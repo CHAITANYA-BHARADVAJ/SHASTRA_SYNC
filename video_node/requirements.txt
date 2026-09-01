@@ -1,0 +1,37 @@
+﻿# Video Perception Node (Teammate 5) - pinned dependency set.
+#
+# IMPORTANT: Requires Python 3.10-3.12 (verified on 3.12.10).
+# Python 3.13/3.14 are NOT supported: mediapipe and tensorflow publish no
+# wheels for them.
+#
+# These versions are pinned deliberately. The unpinned "latest" set does NOT
+# work together:
+#   * mediapipe >= 0.10.30 removed the legacy `mp.solutions` pose API.
+#   * mediapipe 0.10.21 requires protobuf < 5, tensorflow >= 2.19 requires >= 6.
+#   * keras > 3.6 requires a newer ml_dtypes than tensorflow 2.18 pins.
+# The set below is a verified, mutually compatible resolution.
+
+# --- Core vision ---
+opencv-python==4.11.0.86
+mediapipe==0.10.21
+numpy==1.26.4
+
+# --- Emotion analysis ---
+deepface==0.0.100
+tensorflow==2.18.0
+tf-keras==2.18.0
+
+# --- Pinned to hold the resolution together ---
+protobuf==4.25.9
+keras==3.6.0
+ml-dtypes==0.4.1
+jax==0.4.38
+jaxlib==0.4.38
+
+# --- Networking ---
+requests==2.34.2
+
+# --- Demo web app (app.py) ---
+# Flask also arrives via deepface, but the demo depends on it directly,
+# so it is pinned here explicitly.
+Flask==3.1.3

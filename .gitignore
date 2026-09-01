@@ -1,0 +1,30 @@
+﻿# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# --- Virtual environment (large, machine-specific) ---
+.venv/
+venv/
+env/
+
+# --- PyInstaller build output ---
+build/
+dist/
+*.exe
+
+# --- Local secrets / machine config ---
+# .env holds the configured Hub URL for THIS machine. Ship .env.example
+# instead so teammates set their own.
+.env
+
+# --- Logs / scratch ---
+*.log
+*.tmp
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

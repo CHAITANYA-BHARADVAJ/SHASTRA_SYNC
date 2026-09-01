@@ -1,0 +1,305 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Perception Node &mdash; SHASTRA SYNC</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1b202b; --line:#242a38;
+    --text:#e8ebf2; --dim:#8a93a6; --accent:#5b9dff;
+    --ok:#3ddc84; --warn:#ffb340; --crit:#ff5c5c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:center;gap:14px;padding:14px 22px;
+         border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+  .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);
+       padding:3px 8px;border-radius:20px}
+  .spacer{flex:1}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block;
+       margin-right:6px;background:var(--dim)}
+  .dot.live{background:var(--ok);box-shadow:0 0 0 3px rgba(61,220,132,.18)}
+  .dot.bad{background:var(--crit);box-shadow:0 0 0 3px rgba(255,92,92,.18)}
+
+  main{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(340px,1fr);
+       gap:16px;padding:16px 22px 26px;align-items:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+        overflow:hidden}
+  .card h2{font-size:11px;text-transform:uppercase;letter-spacing:.9px;
+           color:var(--dim);margin:0;padding:12px 14px;border-bottom:1px solid var(--line)}
+  .body{padding:14px}
+
+  .feedwrap{position:relative;background:#000;aspect-ratio:4/3}
+  .feedwrap img{width:100%;height:100%;object-fit:contain;display:block}
+  .alertbar{position:absolute;left:0;right:0;bottom:0;padding:11px 14px;
+            font-weight:700;letter-spacing:.4px;display:none;font-size:14px}
+  .alertbar.fall{display:block;background:rgba(255,92,92,.94)}
+  .alertbar.distress{display:block;background:rgba(255,179,64,.94);color:#241a00}
+
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .stat{background:var(--panel2);border:1px solid var(--line);border-radius:9px;
+        padding:9px 11px}
+  .stat .k{font-size:10px;color:var(--dim);text-transform:uppercase;
+           letter-spacing:.7px}
+  .stat .v{font-size:17px;font-weight:650;margin-top:3px;
+           font-variant-numeric:tabular-nums}
+  .v.ok{color:var(--ok)} .v.warn{color:var(--warn)} .v.crit{color:var(--crit)}
+
+  button{font:inherit;font-size:13px;font-weight:600;cursor:pointer;
+         border-radius:9px;border:1px solid var(--line);
+         background:var(--panel2);color:var(--text);padding:10px 12px;
+         transition:filter .12s}
+  button:hover{filter:brightness(1.25)}
+  button:active{transform:translateY(1px)}
+  button.crit{background:#e04141;border-color:#e04141;color:#fff}
+  button.warn{background:#e0932a;border-color:#e0932a;color:#211700}
+  button.ghost{background:transparent}
+  .btnrow{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .btnrow.one{grid-template-columns:1fr;margin-top:9px}
+
+  label.slider{display:block;margin:13px 0 0}
+  label.slider .top{display:flex;justify-content:space-between;
+                    font-size:11.5px;color:var(--dim);margin-bottom:5px}
+  label.slider .top b{color:var(--text);font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+
+  #log{max-height:340px;overflow-y:auto;font-family:ui-monospace,Consolas,monospace;
+       font-size:11.5px}
+  .entry{border-bottom:1px solid var(--line);padding:9px 12px}
+  .entry:last-child{border-bottom:0}
+  .entry .hd{display:flex;gap:8px;align-items:center;margin-bottom:5px}
+  .pill{font-size:9.5px;font-weight:700;text-transform:uppercase;
+        padding:2px 7px;border-radius:20px;letter-spacing:.5px}
+  .pill.fall{background:rgba(255,92,92,.18);color:#ff8f8f}
+  .pill.emotion_detected{background:rgba(255,179,64,.18);color:#ffc978}
+  .pill.manual{background:rgba(91,157,255,.16);color:#9dc3ff}
+  .pill.suppressed{background:rgba(138,147,166,.16);color:var(--dim)}
+  .entry time{color:var(--dim);font-size:10.5px;margin-left:auto}
+  pre{margin:0;white-space:pre-wrap;word-break:break-word;color:#a9d5a0;
+      background:#0e1116;border:1px solid var(--line);border-radius:7px;
+      padding:8px 9px;font-size:10.5px;line-height:1.45}
+  .empty{color:var(--dim);padding:22px 14px;text-align:center;font-size:12.5px}
+  .note{color:var(--dim);font-size:11px;margin-top:9px;line-height:1.5}
+  #hubmsg{font-size:11.5px;margin-top:9px;color:var(--dim);min-height:16px}
+  @media (max-width:1000px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Video Perception Node</h1>
+  <span class="tag">Teammate 5 &middot; The Eyes</span>
+  <div class="spacer"></div>
+  <span class="tag"><span id="dot" class="dot"></span><span id="livetxt">connecting</span></span>
+  <span class="tag" id="elder">&mdash;</span>
+</header>
+
+<main>
+  <!-- LEFT: camera -->
+  <section class="card">
+    <h2>Live camera &mdash; MediaPipe skeleton overlay</h2>
+    <div class="feedwrap">
+      <img src="{{ url_for('video_feed') }}" alt="Live camera feed">
+      <div id="alertbar" class="alertbar"></div>
+    </div>
+    <div class="body">
+      <div class="grid">
+        <div class="stat"><div class="k">Person in frame</div><div class="v" id="s_person">&mdash;</div></div>
+        <div class="stat"><div class="k">Emotion</div><div class="v" id="s_emotion">&mdash;</div></div>
+        <div class="stat"><div class="k">Torso angle from vertical</div><div class="v" id="s_torso">&mdash;</div></div>
+        <div class="stat"><div class="k">Shoulder drop velocity</div><div class="v" id="s_drop">&mdash;</div></div>
+        <div class="stat"><div class="k">Throughput</div><div class="v" id="s_fps">&mdash;</div></div>
+        <div class="stat"><div class="k">Events sent to Hub</div><div class="v ok" id="s_sent">0</div></div>
+      </div>
+      <p class="note" id="hubline">Hub: &mdash;</p>
+    </div>
+  </section>
+
+  <!-- RIGHT: controls + log -->
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <section class="card">
+      <h2>Demo controls</h2>
+      <div class="body">
+        <div class="btnrow">
+          <button class="crit" onclick="trigger('fall')">Simulate Fall</button>
+          <button class="warn" onclick="trigger('emotion_detected')">Simulate Distress</button>
+        </div>
+        <div class="btnrow one">
+          <button class="ghost" onclick="hubCheck()">Test Hub connection</button>
+        </div>
+        <div id="hubmsg"></div>
+        <p class="note">Manual triggers send a real Schema A event to the Hub,
+           so the full pipeline lights up without needing an actual fall.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Detection thresholds (live)</h2>
+      <div class="body">
+        <label class="slider">
+          <span class="top">Fall &mdash; torso angle <b><span id="l_angle">55</span>&deg;</b></span>
+          <input type="range" id="t_angle" min="5" max="89" step="1">
+        </label>
+        <label class="slider">
+          <span class="top">Fall &mdash; drop velocity <b><span id="l_vel">0.35</span>/s</b></span>
+          <input type="range" id="t_vel" min="0.05" max="1.5" step="0.05">
+        </label>
+        <label class="slider">
+          <span class="top">Distress must persist <b><span id="l_sus">4</span>s</b></span>
+          <input type="range" id="t_sus" min="0" max="15" step="0.5">
+        </label>
+        <label class="slider">
+          <span class="top">Event cooldown <b><span id="l_cd">10</span>s</b></span>
+          <input type="range" id="t_cd" min="0" max="60" step="1">
+        </label>
+        <p class="note">Lower the angle and velocity to make a fall easier to
+           trigger on camera. Drop the cooldown to fire repeatedly.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Events sent &mdash; raw Schema A JSON</h2>
+      <div id="log"><div class="empty">No events yet.</div></div>
+    </section>
+
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+/* ---------------- status polling ---------------- */
+let thresholdsTouched = false;
+
+async function poll(){
+  try{
+    const s = await (await fetch('/api/status')).json();
+
+    const live = s.running && s.camera_ok;
+    $('dot').className = 'dot ' + (live ? 'live' : 'bad');
+    $('livetxt').textContent = s.error ? 'camera error'
+                              : (live ? 'live' : 'starting');
+    $('elder').textContent = s.elder_id || '—';
+    $('hubline').textContent = 'Hub: ' + (s.hub_endpoint || '—');
+
+    $('s_person').textContent = s.person_detected ? 'yes' : 'no';
+    $('s_person').className = 'v ' + (s.person_detected ? 'ok' : '');
+
+    const emo = s.emotion || '—';
+    const distress = (emo === 'sad' || emo === 'fear');
+    $('s_emotion').textContent = s.emotion
+        ? `${emo} ${Math.round((s.emotion_confidence||0)*100)}%` : '—';
+    $('s_emotion').className = 'v ' + (distress ? 'crit' : '');
+
+    $('s_torso').textContent = (s.torso_angle ?? 0).toFixed(1) + '°';
+    $('s_torso').className = 'v ' +
+      (s.torso_angle >= (s.thresholds?.fall_torso_angle_deg ?? 55) ? 'warn' : '');
+
+    $('s_drop').textContent = (s.drop_velocity ?? 0).toFixed(2) + '/s';
+    $('s_fps').textContent = (s.fps ?? 0).toFixed(1) + ' fps';
+    $('s_sent').textContent = s.events_sent ?? 0;
+
+    const bar = $('alertbar');
+    if (s.fall_alert){ bar.className = 'alertbar fall'; bar.textContent = 'FALL DETECTED — event sent to Hub'; }
+    else if (s.distress_alert){ bar.className = 'alertbar distress'; bar.textContent = 'EMOTIONAL DISTRESS DETECTED — event sent to Hub'; }
+    else { bar.className = 'alertbar'; }
+
+    if (!thresholdsTouched && s.thresholds) seedSliders(s.thresholds);
+    if (s.error) $('hubmsg').textContent = s.error;
+  }catch(e){
+    $('dot').className = 'dot bad';
+    $('livetxt').textContent = 'disconnected';
+  }
+}
+
+/* ---------------- event log ---------------- */
+function esc(t){ return String(t).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+async function pollLog(){
+  try{
+    const rows = await (await fetch('/api/log')).json();
+    const box = $('log');
+    if(!rows.length){ box.innerHTML = '<div class="empty">No events yet.</div>'; return; }
+    box.innerHTML = rows.map(r => {
+      const sup = r.status === 'suppressed';
+      return `<div class="entry">
+        <div class="hd">
+          <span class="pill ${esc(r.event_type)}">${esc(r.event_type)}</span>
+          ${r.source === 'manual' ? '<span class="pill manual">manual</span>' : ''}
+          ${sup ? '<span class="pill suppressed">cooldown</span>' : ''}
+          <time>${esc(r.at)}</time>
+        </div>
+        ${r.payload ? `<pre>${esc(JSON.stringify(r.payload, null, 2))}</pre>`
+                    : `<div style="color:#8a93a6">suppressed by cooldown — ${esc(r.detail||'')}</div>`}
+      </div>`;
+    }).join('');
+  }catch(e){}
+}
+
+/* ---------------- actions ---------------- */
+async function trigger(kind){
+  try{
+    await fetch('/api/trigger', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({event_type: kind})
+    });
+    pollLog();
+  }catch(e){ $('hubmsg').textContent = 'Trigger failed: ' + e; }
+}
+
+async function hubCheck(){
+  const el = $('hubmsg');
+  el.textContent = 'Contacting Hub…';
+  try{
+    const r = await fetch('/api/hub_check');
+    const d = await r.json();
+    el.textContent = d.ok
+      ? `Hub reachable — HTTP ${d.status_code}, ${d.latency_ms} ms, ${d.pending_events} pending event(s).`
+      : `Hub unreachable — ${d.error || 'HTTP ' + d.status_code}`;
+    el.style.color = d.ok ? 'var(--ok)' : 'var(--crit)';
+  }catch(e){
+    el.textContent = 'Hub check failed: ' + e;
+    el.style.color = 'var(--crit)';
+  }
+}
+
+/* ---------------- thresholds ---------------- */
+const MAP = [
+  ['t_angle','l_angle','fall_torso_angle_deg',    v=>(+v).toFixed(0)],
+  ['t_vel',  'l_vel',  'fall_drop_velocity',      v=>(+v).toFixed(2)],
+  ['t_sus',  'l_sus',  'emotion_sustained_seconds',v=>(+v).toFixed(1)],
+  ['t_cd',   'l_cd',   'cooldown_seconds',        v=>(+v).toFixed(0)],
+];
+
+function seedSliders(t){
+  MAP.forEach(([sid,lid,key,fmt])=>{
+    if(t[key]===undefined) return;
+    $(sid).value = t[key];
+    $(lid).textContent = fmt(t[key]);
+  });
+}
+
+MAP.forEach(([sid,lid,key,fmt])=>{
+  const el = $(sid);
+  el.addEventListener('input', ()=>{
+    thresholdsTouched = true;
+    $(lid).textContent = fmt(el.value);
+  });
+  el.addEventListener('change', async ()=>{
+    await fetch('/api/thresholds', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({[key]: parseFloat(el.value)})
+    });
+  });
+});
+
+poll(); pollLog();
+setInterval(poll, 400);
+setInterval(pollLog, 1200);
+</script>
+</body>
+</html>
