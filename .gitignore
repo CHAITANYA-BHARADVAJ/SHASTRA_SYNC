@@ -1,0 +1,16 @@
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Environment / secrets
+**/.env
+
+# Local databases
+*.db
+shastra_sync.db
+
+# OS
+.DS_Store
+Thumbs.db
