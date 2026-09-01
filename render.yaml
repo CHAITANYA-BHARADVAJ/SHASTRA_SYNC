@@ -1,0 +1,31 @@
+# ==========================================================================
+# Render deployment for Teammate 2 - The AI Brain (background worker).
+#
+# This defines a Background Worker (no web port) that runs the polling agent
+# 24/7 against the live Hub. Render reads this file from the repo ROOT.
+#
+# After connecting the repo in the Render dashboard, set the secret env vars
+# (marked sync: false below) in the service's "Environment" tab. Do NOT put
+# your API key in this file - it lives only in the dashboard.
+# ==========================================================================
+services:
+  - type: worker
+    name: shastra-sync-brain
+    runtime: python
+    plan: free
+    rootDir: agent_brain
+    buildCommand: pip install -r requirements.txt
+    startCommand: python agent.py
+    autoDeploy: true
+    envVars:
+      - key: API_URL
+        value: https://shastra-sync.onrender.com
+      - key: LLM_PROVIDER
+        value: openrouter
+      - key: OPENROUTER_MODEL
+        value: z-ai/glm-5.2:free,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,minimax/minimax-m3:free,nvidia/nemotron-3-super-120b-a12b:free
+      - key: POLL_INTERVAL_SECONDS
+        value: "2"
+      # Secret - do NOT hardcode. Set this in the Render dashboard.
+      - key: OPENROUTER_API_KEY
+        sync: false
