@@ -40,3 +40,6 @@ The system is built as a microservices architecture, divided into 5 strictly iso
 - **Role:** The vision system.
 - **Tech Stack:** Python, OpenCV, MediaPipe, DeepFace.
 - **Function:** Runs locally on a device (e.g., laptop camera) to track skeletal posture for fall detection and facial expressions for emotion recognition.
+
+<img width="1187" height="682" alt="WhatsApp Image 2026-09-02 at 09 22 29" src="https://github.com/user-attachments/assets/67586e7d-9b80-439b-92f7-17589dbd3b75" />
+
