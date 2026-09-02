@@ -1,0 +1,16 @@
+{
+  "name": "Shastra Sync — Family Dashboard",
+  "short_name": "Shastra Sync",
+  "description": "Real-time elder care monitoring dashboard for family members.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#c8ff00",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}
