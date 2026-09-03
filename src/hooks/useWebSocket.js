@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 // Single Base Backend WebSocket URL used across the entire team
-const WS_URL = import.meta.env.VITE_WS_URL || 'wss://shastra-sync.onrender.com/ws/alerts';
+const WS_URL = import.meta.env.VITE_WS_URL || 'wss://3.110.50.100.nip.io/ws/alerts';
 const ELDER_ID = import.meta.env.VITE_ELDER_ID || 'elder_kamala_001';
 
 const INITIAL_RETRY_MS = 1500;

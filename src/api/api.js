@@ -1,5 +1,5 @@
 // Single Base Backend API URL shared across all team members
-export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://shastra-sync.onrender.com').replace(/\/$/, '');
+export const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://3.110.50.100.nip.io').replace(/\/$/, '');
 
 /**
  * Universal HTTP request helper strictly targeting the team's single base backend URL.

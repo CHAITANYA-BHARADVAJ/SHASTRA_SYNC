@@ -17,8 +17,8 @@ Copy `.env.example` to `.env` and configure:
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `VITE_API_URL` | Hub API base URL | `https://shastra-sync.onrender.com` |
-| `VITE_WS_URL` | Hub WebSocket URL | `wss://shastra-sync.onrender.com/ws/alerts` |
+| `VITE_API_URL` | Hub API base URL | `https://3.110.50.100.nip.io` |
+| `VITE_WS_URL` | Hub WebSocket URL | `wss://3.110.50.100.nip.io/ws/alerts` |
 | `VITE_ELDER_ID` | Elder identifier | `elder_kamala_001` |
 
 **Never hardcode URLs in source code.** All network calls read from these env vars via `import.meta.env`.
