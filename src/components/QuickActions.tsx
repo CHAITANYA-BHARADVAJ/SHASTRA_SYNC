@@ -19,6 +19,7 @@ import { LocationTracker } from "./LocationTracker";
 import { ScheduleManager } from "./ScheduleManager";
 import { sendFamilyMessage, sendEmergency, sendEvent } from "@/services/api";
 import { CallInvite } from "@/types/alerts";
+import { useCallRelay } from "@/hooks/useCallRelay";
 
 interface QuickActionsProps {
   elderName: string;
@@ -27,18 +28,20 @@ interface QuickActionsProps {
   elderId: string;
   elderAddress?: string;
   onToast: (type: "success" | "error", title: string, message?: string) => void;
-  sendMessage?: (message: object) => void;
+  registerSentMessage?: (text: string) => void;
 }
 
-export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, elderAddress = "123 Gandhi Nagar, Chennai", onToast, sendMessage }: QuickActionsProps) {
+export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, elderAddress = "123 Gandhi Nagar, Chennai", onToast, registerSentMessage }: QuickActionsProps) {
+  // Call signaling goes through the standalone relay (the alerts backend
+  // does not re-broadcast client messages).
+  const callRelay = useCallRelay();
   const [showEmergencyConfirm, setShowEmergencyConfirm] = useState(false);
   const [showMessageComposer, setShowMessageComposer] = useState(false);
   const [showLocationTracker, setShowLocationTracker] = useState(false);
   const [showScheduleManager, setShowScheduleManager] = useState(false);
 
-  // Broadcast a CallInvite over the WebSocket so the elder dashboard rings.
+  // Broadcast a CallInvite through the relay so the elder dashboard rings.
   const sendCallInvite = (callType: "voice" | "video") => {
-    if (!sendMessage) return;
     const invite: CallInvite = {
       type: "CallInvite",
       call_id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -47,7 +50,7 @@ export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, e
       call_type: callType,
       timestamp: new Date().toISOString(),
     };
-    sendMessage(invite);
+    callRelay.send(invite);
   };
 
   const handleCall = async () => {
@@ -91,6 +94,7 @@ export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, e
   };
 
   const handleSendMessage = async (message: string) => {
+    registerSentMessage?.(message);
     const result = await sendFamilyMessage(elderId, message);
     if (result.success) {
       onToast("success", "Message Sent", `Your message to ${elderName.split(" ")[0]} has been delivered!`);

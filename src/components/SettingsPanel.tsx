@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   X, 
@@ -15,14 +15,13 @@ import {
   User,
   ChevronRight,
   Check,
-  Siren
+  CheckCheck
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
-  onTestAlert?: () => void;
 }
 
 const languages = [
@@ -34,19 +33,74 @@ const languages = [
   { code: "kn", name: "Kannada", native: "ಕನ್ನಡ" },
 ];
 
-export function SettingsPanel({ isOpen, onClose, onTestAlert }: SettingsPanelProps) {
+export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
   const { settings, updateSettings } = useSettings();
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [notifPermission, setNotifPermission] = useState<NotificationPermission | "unsupported">("default");
+
+  // Reflect the real browser notification permission state
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if ("Notification" in window) {
+        setNotifPermission(Notification.permission);
+      } else {
+        setNotifPermission("unsupported");
+      }
+    }
+  }, [isOpen]);
 
   const handleToggle = (key: keyof typeof settings) => {
     if (typeof settings[key] === "boolean") {
       updateSettings({ [key]: !settings[key] });
-      
+
       if (key === "darkMode") {
         document.documentElement.classList.toggle("dark", !settings[key]);
       }
     }
   };
+
+  // Browser notifications need real OS/browser permission, not just a stored flag.
+  const handleNotificationsToggle = async () => {
+    const enabling = !settings.notificationsEnabled;
+
+    if (!enabling) {
+      // Turning off is always allowed
+      updateSettings({ notificationsEnabled: false });
+      return;
+    }
+
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setNotifPermission("unsupported");
+      return;
+    }
+
+    if (Notification.permission === "granted") {
+      setNotifPermission("granted");
+      updateSettings({ notificationsEnabled: true });
+      return;
+    }
+
+    if (Notification.permission === "denied") {
+      // Browser blocks re-prompting; keep it off and reflect the blocked state.
+      setNotifPermission("denied");
+      updateSettings({ notificationsEnabled: false });
+      return;
+    }
+
+    // permission === "default" -> ask the user
+    const result = await Notification.requestPermission();
+    setNotifPermission(result);
+    updateSettings({ notificationsEnabled: result === "granted" });
+  };
+
+  const notificationsSubtitle =
+    notifPermission === "unsupported"
+      ? "Not supported in this browser"
+      : notifPermission === "denied"
+      ? "Blocked — enable in browser site settings"
+      : settings.notificationsEnabled && notifPermission === "granted"
+      ? "Enabled — you'll get browser alerts"
+      : "Get notified in your browser";
 
   const handleLanguageChange = (code: string) => {
     updateSettings({ language: code });
@@ -210,17 +264,18 @@ export function SettingsPanel({ isOpen, onClose, onTestAlert }: SettingsPanelPro
 
                   {/* Browser Notifications */}
                   <motion.button
-                    onClick={() => handleToggle("notificationsEnabled")}
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    className="w-full flex items-center gap-4 p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[#c8ff00]/30 transition-colors"
+                    onClick={handleNotificationsToggle}
+                    disabled={notifPermission === "unsupported"}
+                    whileHover={{ scale: notifPermission === "unsupported" ? 1 : 1.01 }}
+                    whileTap={{ scale: notifPermission === "unsupported" ? 1 : 0.99 }}
+                    className="w-full flex items-center gap-4 p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[#c8ff00]/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.notificationsEnabled ? "bg-[#3b82f6]/10" : "bg-[var(--bg-tertiary)]"}`}>
                       <Bell className={`w-5 h-5 ${settings.notificationsEnabled ? "text-[#3b82f6]" : "text-[var(--text-muted)]"}`} />
                     </div>
                     <div className="flex-1 text-left">
                       <p className="text-sm font-medium text-[var(--text-primary)]">Browser Notifications</p>
-                      <p className="text-xs text-[var(--text-muted)]">Get notified in your browser</p>
+                      <p className="text-xs text-[var(--text-muted)]">{notificationsSubtitle}</p>
                     </div>
                     <div className={`
                       w-12 h-7 rounded-full p-1 transition-colors duration-200
@@ -234,24 +289,65 @@ export function SettingsPanel({ isOpen, onClose, onTestAlert }: SettingsPanelPro
                     </div>
                   </motion.button>
 
-                  {/* Test Alert - fires a sample critical alert to verify sound + notification */}
-                  {onTestAlert && (
-                    <motion.button
-                      onClick={() => {
-                        onTestAlert();
-                      }}
-                      whileHover={{ scale: 1.01 }}
-                      whileTap={{ scale: 0.99 }}
-                      className="w-full flex items-center gap-4 p-4 rounded-xl bg-[#ef4444]/10 border border-[#ef4444]/20 hover:bg-[#ef4444]/15 transition-colors"
+                  {/* Auto-Acknowledge Toggle */}
+                  <motion.button
+                    onClick={() => handleToggle("autoAcknowledge")}
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="w-full flex items-center gap-4 p-4 rounded-xl bg-[var(--card-bg)] border border-[var(--card-border)] hover:border-[#c8ff00]/30 transition-colors"
+                  >
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${settings.autoAcknowledge ? "bg-[#22c55e]/10" : "bg-[var(--bg-tertiary)]"}`}>
+                      <CheckCheck className={`w-5 h-5 ${settings.autoAcknowledge ? "text-[#22c55e]" : "text-[var(--text-muted)]"}`} />
+                    </div>
+                    <div className="flex-1 text-left">
+                      <p className="text-sm font-medium text-[var(--text-primary)]">Auto-Acknowledge</p>
+                      <p className="text-xs text-[var(--text-muted)]">Mark non-critical alerts as read automatically</p>
+                    </div>
+                    <div className={`
+                      w-12 h-7 rounded-full p-1 transition-colors duration-200
+                      ${settings.autoAcknowledge ? "bg-[#c8ff00]" : "bg-[var(--bg-sunken)]"}
+                    `}>
+                      <motion.div
+                        className="w-5 h-5 rounded-full bg-white shadow-md"
+                        animate={{ x: settings.autoAcknowledge ? 20 : 0 }}
+                        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+                      />
+                    </div>
+                  </motion.button>
+
+                  {/* Auto-Acknowledge Delay selector (only when enabled) */}
+                  {settings.autoAcknowledge && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="p-4 rounded-xl bg-[var(--bg-tertiary)]"
                     >
-                      <div className="w-10 h-10 rounded-xl bg-[#ef4444]/20 flex items-center justify-center">
-                        <Siren className="w-5 h-5 text-[#ef4444]" />
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm text-[var(--text-secondary)]">Acknowledge after</span>
+                        <span className="text-sm font-semibold text-[var(--text-primary)]">
+                          {settings.autoAcknowledgeDelay}s
+                        </span>
                       </div>
-                      <div className="flex-1 text-left">
-                        <p className="text-sm font-medium text-[#ef4444]">Test Critical Alert</p>
-                        <p className="text-xs text-[var(--text-muted)]">Play the SOS siren & send a sample notification</p>
+                      <div className="grid grid-cols-4 gap-2">
+                        {[15, 30, 60, 120].map((secs) => (
+                          <button
+                            key={secs}
+                            onClick={() => updateSettings({ autoAcknowledgeDelay: secs })}
+                            className={`py-2 rounded-lg text-xs font-medium transition-colors ${
+                              settings.autoAcknowledgeDelay === secs
+                                ? "bg-[#c8ff00] text-[#1a1d29]"
+                                : "bg-[var(--bg-sunken)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                            }`}
+                          >
+                            {secs < 60 ? `${secs}s` : `${secs / 60}m`}
+                          </button>
+                        ))}
                       </div>
-                    </motion.button>
+                      <p className="mt-3 text-xs text-[var(--text-muted)]">
+                        Critical alerts are never auto-acknowledged and always require your attention.
+                      </p>
+                    </motion.div>
                   )}
                 </div>
               </div>

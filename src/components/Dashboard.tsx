@@ -53,8 +53,7 @@ export function Dashboard() {
     clearAllAlerts, 
     clearAlert,
     reconnect,
-    triggerTestAlert,
-    sendMessage,
+    registerSentMessage,
     stats 
   } = useWebSocket(settings.soundEnabled, settings.soundVolume);
 
@@ -133,6 +132,22 @@ export function Dashboard() {
     acknowledgeAll();
     showToast({ type: "success", title: "All Acknowledged", message: `${stats.unacknowledged} alerts marked as read` });
   };
+
+  // Auto-Acknowledge: when enabled, mark non-critical unacknowledged alerts as read
+  // after the configured delay. Critical alerts are never auto-acknowledged.
+  useEffect(() => {
+    if (!settings.autoAcknowledge) return;
+
+    const pending = alerts.filter((a) => !a.acknowledged && a.severity !== "critical");
+    if (pending.length === 0) return;
+
+    const delayMs = Math.max(1, settings.autoAcknowledgeDelay) * 1000;
+    const timers = pending.map((alert) =>
+      setTimeout(() => acknowledgeAlert(alert.id), delayMs)
+    );
+
+    return () => timers.forEach(clearTimeout);
+  }, [alerts, settings.autoAcknowledge, settings.autoAcknowledgeDelay, acknowledgeAlert]);
 
   // Handle clear all with toast
   const handleClearAll = () => {
@@ -272,7 +287,7 @@ export function Dashboard() {
                     elderId={elderProfile.id}
                     elderAddress={elderProfile.address}
                     onToast={handleQuickActionToast}
-                    sendMessage={sendMessage}
+                    registerSentMessage={registerSentMessage}
                   />
                 </div>
 
@@ -471,10 +486,6 @@ export function Dashboard() {
       <SettingsPanel
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
-        onTestAlert={() => {
-          triggerTestAlert();
-          showToast({ type: "warning", title: "Test Alert Fired", message: "Playing SOS siren — check your sound and notifications." });
-        }}
       />
 
       {/* Profile Panel */}
@@ -495,6 +506,7 @@ export function Dashboard() {
         onClose={() => setShowProfileMessage(false)}
         elderName={elderProfile.name}
         onSend={async (message) => {
+          registerSentMessage(message);
           const result = await sendFamilyMessage(elderProfile.id, message);
           if (result.success) {
             showToast({ type: "success", title: "Message Sent", message: `Your message to ${elderProfile.name.split(" ")[0]} has been delivered!` });

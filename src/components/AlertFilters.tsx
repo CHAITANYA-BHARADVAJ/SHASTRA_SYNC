@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Search, Filter, X } from "lucide-react";
+import { X } from "lucide-react";
 
 export type SeverityFilter = "all" | "critical" | "high" | "medium" | "low";
 export type StatusFilter = "all" | "unread" | "acknowledged";
@@ -20,11 +20,10 @@ interface AlertFiltersProps {
 export function AlertFilters({ onFilterChange, totalCount, filteredCount }: AlertFiltersProps) {
   const [severity, setSeverity] = useState<SeverityFilter>("all");
   const [status, setStatus] = useState<StatusFilter>("all");
-  const [search, setSearch] = useState("");
 
   useEffect(() => {
-    onFilterChange({ severity, status, search });
-  }, [severity, status, search, onFilterChange]);
+    onFilterChange({ severity, status, search: "" });
+  }, [severity, status, onFilterChange]);
 
   const severityOptions: { value: SeverityFilter; label: string; color: string }[] = [
     { value: "all", label: "All", color: "var(--text-muted)" },
@@ -40,38 +39,15 @@ export function AlertFilters({ onFilterChange, totalCount, filteredCount }: Aler
     { value: "acknowledged", label: "Read" },
   ];
 
-  const hasActiveFilters = severity !== "all" || status !== "all" || search !== "";
+  const hasActiveFilters = severity !== "all" || status !== "all";
 
   const clearFilters = () => {
     setSeverity("all");
     setStatus("all");
-    setSearch("");
   };
 
   return (
     <div className="space-y-3">
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
-        <input
-          type="text"
-          placeholder="Search alerts..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-[var(--input-bg)] border border-[var(--input-border)] text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[#c8ff00] transition-colors"
-        />
-        {search && (
-          <motion.button
-            initial={{ scale: 0 }}
-            animate={{ scale: 1 }}
-            onClick={() => setSearch("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-[var(--bg-tertiary)] flex items-center justify-center text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-          >
-            <X className="w-3 h-3" />
-          </motion.button>
-        )}
-      </div>
-
       {/* Filters Row */}
       <div className="flex flex-wrap items-center gap-2">
         {/* Severity Filter */}

@@ -11,7 +11,6 @@ import {
   Moon,
   Sun,
   ChevronDown,
-  Search,
   User,
   Shield,
   Zap
@@ -153,15 +152,6 @@ export function Header({
 
           {/* Right: Actions */}
           <div className="flex items-center gap-2">
-            {/* Search Button */}
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              className="btn-icon hidden sm:flex"
-            >
-              <Search className="w-4 h-4" />
-            </motion.button>
-
             {/* Connection Status */}
             <motion.button
               onClick={(connectionStatus === "disconnected" || connectionStatus === "error") ? onReconnect : undefined}

@@ -18,6 +18,7 @@ export interface UseWebSocketReturn {
   clearAlert: (id: string) => void;
   reconnect: () => void;
   sendMessage: (message: object) => void;
+  registerSentMessage: (text: string) => void;
   triggerTestAlert: () => void;
   stats: {
     totalAlerts: number;
@@ -34,6 +35,10 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
+
+  // Track messages this family member just sent, so the backend's echo of them
+  // (broadcast back as a FamilyAlert) doesn't show up in our own alert feed.
+  const sentMessagesRef = useRef<{ text: string; at: number }[]>([]);
 
   // Log the WebSocket URL being used
   useEffect(() => {
@@ -83,27 +88,23 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
         oscillator.stop(startTime + duration);
       };
 
-      // A single siren "wail": frequency ramps up then down, harsher timbre.
-      const playWail = (delay: number, wailDuration: number = 0.8) => {
+      // A clean two-tone alarm "beep" (steady frequency, quick on/off).
+      // Used to build a smoke-alarm / hospital-monitor style alternating pattern.
+      const playAlarmBeep = (freq: number, delay: number, duration: number = 0.18) => {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
-        oscillator.type = "sawtooth"; // siren-like
+        oscillator.type = "square"; // crisp, alarm-like
+        oscillator.frequency.value = freq;
 
         const startTime = now + delay;
-        const mid = startTime + wailDuration / 2;
-        const end = startTime + wailDuration;
+        const end = startTime + duration;
 
-        // Wail 600 -> 1200 -> 600 Hz
-        oscillator.frequency.setValueAtTime(600, startTime);
-        oscillator.frequency.linearRampToValueAtTime(1200, mid);
-        oscillator.frequency.linearRampToValueAtTime(600, end);
-
-        // Envelope
+        // Fast attack, short sustain, fast release for a clean "beep"
         gainNode.gain.setValueAtTime(0.0001, startTime);
-        gainNode.gain.exponentialRampToValueAtTime(volume * 0.6, startTime + 0.05);
-        gainNode.gain.setValueAtTime(volume * 0.6, end - 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(volume * 0.5, startTime + 0.01);
+        gainNode.gain.setValueAtTime(volume * 0.5, end - 0.02);
         gainNode.gain.exponentialRampToValueAtTime(0.0001, end);
 
         oscillator.start(startTime);
@@ -112,10 +113,13 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
 
       switch (severity) {
         case "critical":
-          // SOS siren: 3 rising-falling wails back to back
-          playWail(0, 0.8);
-          playWail(0.85, 0.8);
-          playWail(1.7, 0.8);
+          // Two-tone alarm: alternating high-low beeps (hi-lo hi-lo hi-lo)
+          playAlarmBeep(880, 0);      // high
+          playAlarmBeep(660, 0.22);   // low
+          playAlarmBeep(880, 0.44);   // high
+          playAlarmBeep(660, 0.66);   // low
+          playAlarmBeep(880, 0.88);   // high
+          playAlarmBeep(660, 1.10);   // low
           break;
         case "high":
           // Rising double beep
@@ -161,11 +165,38 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     }
   }, []);
 
+  // Record a message the family just sent. Kept for a short window so we can
+  // recognize (and suppress) the backend's echo of it in the alert feed.
+  const registerSentMessage = useCallback((text: string) => {
+    const trimmed = text.trim().toLowerCase();
+    if (!trimmed) return;
+    const now = Date.now();
+    // Keep only entries from the last 2 minutes.
+    sentMessagesRef.current = [
+      ...sentMessagesRef.current.filter((m) => now - m.at < 120000),
+      { text: trimmed, at: now },
+    ];
+  }, []);
+
+  // Does an incoming alert look like an echo of a message we just sent?
+  const isEchoOfSentMessage = useCallback((alertText: string) => {
+    const haystack = alertText.toLowerCase();
+    const now = Date.now();
+    return sentMessagesRef.current.some(
+      (m) => now - m.at < 120000 && m.text.length > 0 && haystack.includes(m.text)
+    );
+  }, []);
+
   // Process incoming WebSocket message
   const processMessage = useCallback((data: WebSocketMessage) => {
     if (data.type === "FamilyAlert") {
       const familyAlert = data as FamilyAlert;
-      
+
+      // Suppress the backend's echo of our own outgoing message.
+      if (isEchoOfSentMessage(familyAlert.message)) {
+        return;
+      }
+
       const newAlert: DashboardAlert = {
         id: familyAlert.alert_id,
         message: familyAlert.message,
@@ -228,7 +259,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
         return [activity, ...prev].slice(0, 50);
       });
     }
-  }, [playAlertSound, showBrowserNotification]);
+  }, [playAlertSound, showBrowserNotification, isEchoOfSentMessage]);
 
   // Connect to WebSocket
   const connect = useCallback(() => {
@@ -405,6 +436,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     clearAlert,
     reconnect,
     sendMessage,
+    registerSentMessage,
     triggerTestAlert,
     stats,
   };
