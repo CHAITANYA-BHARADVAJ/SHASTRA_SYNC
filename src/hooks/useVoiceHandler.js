@@ -304,62 +304,109 @@ export function useVoiceHandler() {
   /**
    * Select crystal-clear, natural, non-robotic synthesizer voice with pleasant accent
    */
+  /**
+   * Select crystal-clear, authentic natural voice tailored for each language
+   */
   const getVoiceForLanguage = useCallback((langCode) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
     if (!voices || voices.length === 0) return null;
 
     const langLower = (langCode || 'en-IN').toLowerCase();
-    const prefix = langLower.split('-')[0]; // 'en', 'kn', 'hi'
+    const prefix = langLower.split('-')[0]; // 'kn', 'hi', 'ta', 'te', 'en'
 
-    // 1. Prioritize Microsoft Natural / Neural online voices (cleanest, most human sound)
-    const naturalVoice = voices.find(
-      (v) =>
-        (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural') || v.name.toLowerCase().includes('online')) &&
-        (v.lang.toLowerCase().startsWith(prefix) || v.lang.toLowerCase().startsWith('en'))
-    );
-    if (naturalVoice) {
-      log(`🎙️ Using Natural Voice: "${naturalVoice.name}" (${naturalVoice.lang})`, 'success');
-      return naturalVoice;
+    // 1. Kannada ('kn' / 'kn-IN')
+    if (prefix === 'kn') {
+      const knVoice =
+        voices.find((v) => (v.name.toLowerCase().includes('gagan') || v.name.toLowerCase().includes('sapna')) && v.name.toLowerCase().includes('natural')) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('kn') && (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural'))) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('kn') || v.name.toLowerCase().includes('kannada') || v.name.includes('ಕನ್ನಡ')) ||
+        voices.find((v) => v.lang.toLowerCase() === 'kn-in');
+
+      if (knVoice) {
+        log(`🎙️ Using Natural Kannada Voice: "${knVoice.name}" (${knVoice.lang})`, 'success');
+        return knVoice;
+      }
     }
 
-    // 2. High-clarity pleasant voices (Google, Samantha, Jenny, Aria, Zira, Karen)
-    const premiumNames = [
+    // 2. Hindi ('hi' / 'hi-IN')
+    if (prefix === 'hi') {
+      const hiVoice =
+        voices.find((v) => (v.name.toLowerCase().includes('swara') || v.name.toLowerCase().includes('madhur')) && v.name.toLowerCase().includes('natural')) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('hi') && (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural'))) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('hi') || v.name.toLowerCase().includes('hindi') || v.name.includes('हिन्दी')) ||
+        voices.find((v) => v.lang.toLowerCase() === 'hi-in');
+
+      if (hiVoice) {
+        log(`🎙️ Using Natural Hindi Voice: "${hiVoice.name}" (${hiVoice.lang})`, 'success');
+        return hiVoice;
+      }
+    }
+
+    // 3. Tamil ('ta' / 'ta-IN')
+    if (prefix === 'ta') {
+      const taVoice =
+        voices.find((v) => (v.name.toLowerCase().includes('pallavi') || v.name.toLowerCase().includes('valluvar')) && v.name.toLowerCase().includes('natural')) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('ta') && (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural'))) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('ta') || v.name.toLowerCase().includes('tamil'));
+
+      if (taVoice) {
+        log(`🎙️ Using Natural Tamil Voice: "${taVoice.name}" (${taVoice.lang})`, 'success');
+        return taVoice;
+      }
+    }
+
+    // 4. Telugu ('te' / 'te-IN')
+    if (prefix === 'te') {
+      const teVoice =
+        voices.find((v) => (v.name.toLowerCase().includes('mohan') || v.name.toLowerCase().includes('shruti')) && v.name.toLowerCase().includes('natural')) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('te') && (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural'))) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith('te') || v.name.toLowerCase().includes('telugu'));
+
+      if (teVoice) {
+        log(`🎙️ Using Natural Telugu Voice: "${teVoice.name}" (${teVoice.lang})`, 'success');
+        return teVoice;
+      }
+    }
+
+    // 5. English ('en' / 'en-IN' / 'en-US') - Natural & Clear
+    const preferredEnglishVoices = [
+      'neerja',
+      'jenny',
+      'aria',
       'google us english',
       'google uk english female',
-      'microsoft jenny',
-      'microsoft aria',
-      'microsoft guy',
+      'guy',
+      'sonia',
       'samantha',
       'karen',
-      'microsoft zira',
-      'victoria',
-      'serena'
+      'microsoft zira'
     ];
 
-    for (const name of premiumNames) {
-      const match = voices.find((v) => v.name.toLowerCase().includes(name));
+    for (const name of preferredEnglishVoices) {
+      const match = voices.find(
+        (v) =>
+          v.name.toLowerCase().includes(name) &&
+          (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('online') || !v.name.toLowerCase().includes('desktop'))
+      );
       if (match) {
-        log(`🎙️ Using Clear Voice: "${match.name}"`, 'success');
+        log(`🎙️ Using Clear English Voice: "${match.name}"`, 'success');
         return match;
       }
     }
 
-    // 3. Filter out known weird/robotic legacy voices (e.g. 'ravi', 'neera', 'david')
-    const nonRobotic = voices.filter(
+    // Fallback: any voice matching language prefix that is not a legacy robotic voice
+    const matchedPrefix = voices.find(
       (v) =>
         v.lang.toLowerCase().startsWith(prefix) &&
         !v.name.toLowerCase().includes('ravi') &&
         !v.name.toLowerCase().includes('neera') &&
         !v.name.toLowerCase().includes('david')
     );
-    if (nonRobotic.length > 0) {
-      return nonRobotic[0];
-    }
+    if (matchedPrefix) return matchedPrefix;
 
-    // 4. Any English standard voice fallback
-    const enFallback = voices.find((v) => v.lang.toLowerCase().startsWith('en'));
-    return enFallback || voices[0];
+    const anyEn = voices.find((v) => v.lang.toLowerCase().startsWith('en'));
+    return anyEn || voices[0];
   }, [log]);
 
   /**
@@ -383,6 +430,12 @@ export function useVoiceHandler() {
         onTranscriptCb = arg3 || null;
       }
 
+      // Auto-detect language script
+      if (/[\u0C80-\u0CFF]/.test(msg)) targetLang = 'kn-IN';
+      else if (/[\u0900-\u097F]/.test(msg)) targetLang = 'hi-IN';
+      else if (/[\u0B80-\u0BFF]/.test(msg)) targetLang = 'ta-IN';
+      else if (/[\u0C00-\u0C7F]/.test(msg)) targetLang = 'te-IN';
+
       log(`⚡ Clear Voice TTS (${targetLang}): "${msg.substring(0, 60)}..."`, 'info');
 
       if (!isTTSSupported) {
@@ -396,15 +449,16 @@ export function useVoiceHandler() {
         try { window.speechSynthesis.resume(); } catch (e) {}
       }
 
+      const isIndic = ['kn', 'hi', 'ta', 'te'].includes(targetLang.split('-')[0]);
+      const targetVoice = getVoiceForLanguage(targetLang);
+
       const utterance = new SpeechSynthesisUtterance(msg);
-      utterance.lang = 'en-US';
-      utterance.rate = 1.0;
+      utterance.lang = targetVoice ? targetVoice.lang : (isIndic ? targetLang : 'en-US');
+      utterance.rate = isIndic ? 0.90 : 1.0;
       utterance.pitch = 1.0;
 
-      const targetVoice = getVoiceForLanguage(targetLang);
       if (targetVoice) {
         utterance.voice = targetVoice;
-        utterance.lang = targetVoice.lang;
       }
 
       isSpeakingRef.current = true;
@@ -431,15 +485,24 @@ export function useVoiceHandler() {
     (message, languageCode = 'en-IN') => {
       if (!isTTSSupported) return;
       window.speechSynthesis.cancel();
+
+      // Auto-detect language script
+      let detectedLang = languageCode || 'en-IN';
+      if (/[\u0C80-\u0CFF]/.test(message)) detectedLang = 'kn-IN';
+      else if (/[\u0900-\u097F]/.test(message)) detectedLang = 'hi-IN';
+      else if (/[\u0B80-\u0BFF]/.test(message)) detectedLang = 'ta-IN';
+      else if (/[\u0C00-\u0C7F]/.test(message)) detectedLang = 'te-IN';
+
+      const isIndic = ['kn', 'hi', 'ta', 'te'].includes(detectedLang.split('-')[0]);
+      const targetVoice = getVoiceForLanguage(detectedLang);
+
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = 'en-US';
-      utterance.rate = 1.0;
+      utterance.lang = targetVoice ? targetVoice.lang : (isIndic ? detectedLang : 'en-US');
+      utterance.rate = isIndic ? 0.90 : 1.0;
       utterance.pitch = 1.0;
 
-      const targetVoice = getVoiceForLanguage(languageCode);
       if (targetVoice) {
         utterance.voice = targetVoice;
-        utterance.lang = targetVoice.lang;
       }
 
       isSpeakingRef.current = true;
