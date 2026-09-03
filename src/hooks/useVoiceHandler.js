@@ -301,101 +301,81 @@ export function useVoiceHandler() {
   /**
    * Helper to select appropriate synthesizer voice matching language (Kannada, Hindi, English)
    */
+  /**
+   * Select crystal-clear, natural, non-robotic synthesizer voice with pleasant accent
+   */
   const getVoiceForLanguage = useCallback((langCode) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) return null;
     const voices = window.speechSynthesis.getVoices();
     if (!voices || voices.length === 0) return null;
 
-    const langLower = (langCode || 'kn-IN').toLowerCase();
-    const prefix = langLower.split('-')[0]; // 'kn', 'hi', 'en'
+    const langLower = (langCode || 'en-IN').toLowerCase();
+    const prefix = langLower.split('-')[0]; // 'en', 'kn', 'hi'
 
-    // 1. Kannada ('kn' / 'kn-IN')
-    if (prefix === 'kn') {
-      // Direct Kannada voice matches (Google ಕನ್ನಡ, Microsoft Gagan/Sapna, etc.)
-      const knVoice = voices.find(
-        (v) =>
-          v.lang.toLowerCase() === 'kn-in' ||
-          v.lang.toLowerCase().startsWith('kn') ||
-          v.name.toLowerCase().includes('kannada') ||
-          v.name.toLowerCase().includes('gagan') ||
-          v.name.toLowerCase().includes('sapna')
-      );
-      if (knVoice) {
-        log(`🎙️ Using Kannada TTS Voice: "${knVoice.name}" (${knVoice.lang})`, 'success');
-        return knVoice;
-      }
-      // Regional Indian voice fallback with Indic phonetics
-      const inVoice = voices.find(
-        (v) =>
-          v.lang.toLowerCase().includes('hi-in') ||
-          v.lang.toLowerCase().includes('en-in') ||
-          v.name.toLowerCase().includes('india')
-      );
-      if (inVoice) {
-        log(`🎙️ Kannada voice fallback to Indic regional voice: "${inVoice.name}"`, 'info');
-        return inVoice;
-      }
-      return null;
+    // 1. Prioritize Microsoft Natural / Neural online voices (cleanest, most human sound)
+    const naturalVoice = voices.find(
+      (v) =>
+        (v.name.toLowerCase().includes('natural') || v.name.toLowerCase().includes('neural') || v.name.toLowerCase().includes('online')) &&
+        (v.lang.toLowerCase().startsWith(prefix) || v.lang.toLowerCase().startsWith('en'))
+    );
+    if (naturalVoice) {
+      log(`🎙️ Using Natural Voice: "${naturalVoice.name}" (${naturalVoice.lang})`, 'success');
+      return naturalVoice;
     }
 
-    // 2. Hindi ('hi' / 'hi-IN')
-    if (prefix === 'hi') {
-      const hiVoice = voices.find(
-        (v) =>
-          v.lang.toLowerCase() === 'hi-in' ||
-          v.lang.toLowerCase().startsWith('hi') ||
-          v.name.toLowerCase().includes('hindi') ||
-          v.name.toLowerCase().includes('swara') ||
-          v.name.toLowerCase().includes('madhur')
-      );
-      if (hiVoice) {
-        log(`🎙️ Using Hindi TTS Voice: "${hiVoice.name}" (${hiVoice.lang})`, 'success');
-        return hiVoice;
-      }
-      const inVoice = voices.find(
-        (v) =>
-          v.lang.toLowerCase().includes('en-in') ||
-          v.name.toLowerCase().includes('india')
-      );
-      return inVoice || null;
-    }
-
-    // 3. English
-    const preferredEnglish = [
-      'google uk english male',
-      'microsoft ravi',
-      'microsoft neera',
+    // 2. High-clarity pleasant voices (Google, Samantha, Jenny, Aria, Zira, Karen)
+    const premiumNames = [
       'google us english',
-      'microsoft david',
-      'david',
-      'male'
+      'google uk english female',
+      'microsoft jenny',
+      'microsoft aria',
+      'microsoft guy',
+      'samantha',
+      'karen',
+      'microsoft zira',
+      'victoria',
+      'serena'
     ];
 
-    for (const name of preferredEnglish) {
+    for (const name of premiumNames) {
       const match = voices.find((v) => v.name.toLowerCase().includes(name));
       if (match) {
-        log(`🎙️ Using English Voice: "${match.name}"`, 'success');
+        log(`🎙️ Using Clear Voice: "${match.name}"`, 'success');
         return match;
       }
     }
 
-    return voices.find((v) => v.lang.toLowerCase().startsWith('en')) || voices[0];
+    // 3. Filter out known weird/robotic legacy voices (e.g. 'ravi', 'neera', 'david')
+    const nonRobotic = voices.filter(
+      (v) =>
+        v.lang.toLowerCase().startsWith(prefix) &&
+        !v.name.toLowerCase().includes('ravi') &&
+        !v.name.toLowerCase().includes('neera') &&
+        !v.name.toLowerCase().includes('david')
+    );
+    if (nonRobotic.length > 0) {
+      return nonRobotic[0];
+    }
+
+    // 4. Any English standard voice fallback
+    const enFallback = voices.find((v) => v.lang.toLowerCase().startsWith('en'));
+    return enFallback || voices[0];
   }, [log]);
 
   /**
    * Speak TTS then listen immediately with zero latency (supports both object and positional args)
    */
   const speakThenListen = useCallback(
-    (arg1, arg2 = 'kn-IN', arg3) => {
+    (arg1, arg2 = 'en-IN', arg3) => {
       setError(null);
 
       let msg = '';
-      let targetLang = 'kn-IN';
+      let targetLang = 'en-IN';
       let onTranscriptCb = null;
 
       if (typeof arg1 === 'object' && arg1 !== null) {
         msg = arg1.prompt || arg1.message || '';
-        targetLang = arg1.languageCode || arg1.language || 'kn-IN';
+        targetLang = arg1.languageCode || arg1.language || 'en-IN';
         onTranscriptCb = arg1.onTranscript || null;
       } else {
         msg = arg1 || '';
@@ -403,7 +383,7 @@ export function useVoiceHandler() {
         onTranscriptCb = arg3 || null;
       }
 
-      log(`⚡ Zero-Latency TTS (${targetLang}): "${msg.substring(0, 60)}..."`, 'info');
+      log(`⚡ Clear Voice TTS (${targetLang}): "${msg.substring(0, 60)}..."`, 'info');
 
       if (!isTTSSupported) {
         listen(targetLang, onTranscriptCb);
@@ -417,13 +397,14 @@ export function useVoiceHandler() {
       }
 
       const utterance = new SpeechSynthesisUtterance(msg);
-      utterance.lang = targetLang;
-      utterance.rate = 0.98;
+      utterance.lang = 'en-US';
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       const targetVoice = getVoiceForLanguage(targetLang);
       if (targetVoice) {
         utterance.voice = targetVoice;
+        utterance.lang = targetVoice.lang;
       }
 
       isSpeakingRef.current = true;
@@ -451,13 +432,14 @@ export function useVoiceHandler() {
       if (!isTTSSupported) return;
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = languageCode;
-      utterance.rate = 0.95;
+      utterance.lang = 'en-US';
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       const targetVoice = getVoiceForLanguage(languageCode);
       if (targetVoice) {
         utterance.voice = targetVoice;
+        utterance.lang = targetVoice.lang;
       }
 
       isSpeakingRef.current = true;

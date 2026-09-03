@@ -204,6 +204,29 @@ export default function ElderScreen() {
   // Live Family Dashboard Bidirectional State
   const [familyMessage, setFamilyMessage] = useState(DEFAULT_FAMILY_MESSAGE);
   const [incomingCall, setIncomingCall] = useState(null); // { caller: string, timestamp: number }
+  const [activeCall, setActiveCall] = useState(null); // { call_id: string, caller: string, startTime: number }
+  const [activeCallDuration, setActiveCallDuration] = useState(0);
+  const handledCallsRef = useRef(new Set());
+  const activeCallRef = useRef(null);
+  activeCallRef.current = activeCall;
+
+  useEffect(() => {
+    if (!activeCall) {
+      setActiveCallDuration(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      setActiveCallDuration((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [activeCall]);
+
+  const formatCallDuration = useCallback((seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  }, []);
+
   const [familyAck, setFamilyAck] = useState(null); // { acknowledgedBy: string, message: string, timestamp: number }
   const [aiAgentStatus, setAiAgentStatus] = useState(null); // { action: string, message: string, reasoning: string }
 
@@ -599,11 +622,15 @@ export default function ElderScreen() {
     const callId = incomingCall?.call_id || `call_${Date.now()}`;
     const elderId = incomingCall?.elder_id || ELDER_ID;
 
+    // 1. Mark this call as handled so it NEVER loops or re-prompts
+    handledCallsRef.current.add(callId);
     setIncomingCall(null);
+    setActiveCall({ call_id: callId, caller, startTime: Date.now() });
+
     playSuccessChime();
     speak(`Call connected with ${caller}. You can speak now.`, selectedLang);
 
-    // 1. Send Schema E CallResponse directly over WebSocket to Teammate 4 Dashboard
+    // 2. Send Schema E CallResponse directly over WebSocket to Teammate 4 Dashboard
     sendMessage({
       type: 'CallResponse',
       call_id: callId,
@@ -612,7 +639,7 @@ export default function ElderScreen() {
       timestamp: new Date().toISOString(),
     });
 
-    // 2. Dual-dispatch backward compatible status event
+    // 3. Dual-dispatch backward compatible status event
     sendMessage({
       type: 'call_accepted',
       call_id: callId,
@@ -626,9 +653,31 @@ export default function ElderScreen() {
       eventType: 'voice_input',
       confidence: 1.0,
       voiceTranscript: `Live call connected with ${caller}.`,
+      sender: 'Kamala Devi (Elder)',
     });
     postSensorEvent(payload).catch(() => {});
   }, [incomingCall, speak, selectedLang, sendMessage]);
+
+  /**
+   * End Active In-Progress Live Call
+   */
+  const handleEndActiveCall = useCallback(() => {
+    const caller = activeCall?.caller || 'Family (Priya)';
+    const callId = activeCall?.call_id || `call_${Date.now()}`;
+
+    setActiveCall(null);
+    playGentleChime();
+    speak('Call ended.', selectedLang);
+
+    sendMessage({
+      type: 'call_ended',
+      call_id: callId,
+      elder_id: ELDER_ID,
+      caller: caller,
+      status: 'ended',
+      timestamp: new Date().toISOString(),
+    });
+  }, [activeCall, speak, selectedLang, sendMessage]);
 
   /**
    * Decline Incoming Call from Family Dashboard (Teammate 4 Schema E CallResponse)
@@ -638,6 +687,8 @@ export default function ElderScreen() {
     const callId = incomingCall?.call_id || `call_${Date.now()}`;
     const elderId = incomingCall?.elder_id || ELDER_ID;
 
+    // Mark call as handled so it never re-triggers
+    handledCallsRef.current.add(callId);
     setIncomingCall(null);
     playGentleChime();
 
@@ -937,13 +988,52 @@ export default function ElderScreen() {
       if (dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
       if (dedupKey) processedDecisionsRef.current.add(dedupKey);
 
-      // Do NOT process self-initiated calls or self-initiated SOS as incoming alerts
+      // =========================================================================
+      // 0. CALL RESPONSES, TERMINATIONS & ECHOES (NEVER TRIGGER INCOMING CALL ALERT)
+      // =========================================================================
+      const isCallStatusOrTermination =
+        type === 'callresponse' ||
+        type === 'call_response' ||
+        type === 'call_accepted' ||
+        type === 'call_declined' ||
+        type === 'call_ended' ||
+        type === 'call_rejected' ||
+        type === 'call_cancelled' ||
+        payload.type === 'CallResponse' ||
+        payload.type === 'call_accepted' ||
+        payload.type === 'call_ended' ||
+        payload.response === 'accepted' ||
+        payload.response === 'declined' ||
+        payload.status === 'connected' ||
+        payload.status === 'accepted' ||
+        payload.status === 'declined' ||
+        payload.status === 'ended' ||
+        lowerText.includes('call connected') ||
+        lowerText.includes('call accepted') ||
+        lowerText.includes('call declined') ||
+        lowerText.includes('call ended') ||
+        lowerText.includes('live call connected');
+
+      if (isCallStatusOrTermination) {
+        if (type === 'call_ended' || payload.status === 'ended' || lowerText.includes('call ended')) {
+          setActiveCall(null);
+          setIncomingCall(null);
+        }
+        if (payload.call_id) {
+          handledCallsRef.current.add(payload.call_id);
+        }
+        return;
+      }
+
+      // Do NOT process self-initiated calls or already handled calls
       if (
         lowerText.includes('elder initiated phone call') ||
         lowerText.includes('calling priya') ||
         lowerText.includes('kamala devi is calling') ||
         lowerText.includes('kamala devi pressed sos') ||
-        payload.caller_name === 'Kamala Devi (Mother)'
+        payload.caller_name === 'Kamala Devi (Mother)' ||
+        (payload.call_id && handledCallsRef.current.has(payload.call_id)) ||
+        activeCallRef.current !== null // Cannot receive another call if already connected!
       ) {
         return;
       }
@@ -958,9 +1048,12 @@ export default function ElderScreen() {
         // Ignore calls initiated by the elder herself
         if (callerName.includes('Kamala')) return;
 
+        const callId = payload.call_id || `call_${Date.now()}`;
+        if (handledCallsRef.current.has(callId)) return;
+
         const callType = payload.call_type || 'voice';
         setIncomingCall({
-          call_id: payload.call_id || `call_${Date.now()}`,
+          call_id: callId,
           elder_id: payload.elder_id || ELDER_ID,
           caller: callerName,
           callType: callType,
@@ -976,17 +1069,16 @@ export default function ElderScreen() {
         ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_request', 'call_elder', 'start_call', 'webrtc_call', 'phone_call'].includes(type) ||
         ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'call_request'].includes(action) ||
         ['call', 'family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
-        Boolean(payload.call || payload.is_call || payload.call_url || payload.room_url || payload.meet_url || payload.jitsi_url || payload.call_id) ||
-        (eventType === 'normal' && (lowerText.includes('call to') || lowerText.includes('voice call') || lowerText.includes('video call'))) ||
-        ((lowerText.includes('call') || lowerText.includes('calling') || lowerText.includes('video call') || lowerText.includes('phone call')) &&
-          !lowerText.includes('112') && !lowerText.includes('ambulance') && !lowerText.includes('emergency services') &&
-          (lowerText.includes('priya') || lowerText.includes('family') || lowerText.includes('daughter') || lowerText.includes('request') || lowerText.includes('speak') || lowerText.includes('welfare')));
+        (payload.call_id && !handledCallsRef.current.has(payload.call_id) && (type.includes('invite') || action.includes('invite') || lowerText.includes('is calling') || lowerText.includes('incoming')));
 
       if (isCall) {
+        const callId = payload.call_id || `call_${Date.now()}`;
+        if (handledCallsRef.current.has(callId)) return;
+
         const callerName = payload.caller || payload.caller_name || payload.sender || 'Family (Priya)';
         const callType = (type.includes('video') || action.includes('video') || lowerText.includes('video')) ? 'video' : 'audio';
         setIncomingCall({
-          call_id: payload.call_id || `call_${Date.now()}`,
+          call_id: callId,
           elder_id: payload.elder_id || ELDER_ID,
           caller: callerName,
           callType: callType,
@@ -2053,6 +2145,36 @@ export default function ElderScreen() {
               <button className="btn-call-decline" onClick={handleDeclineIncomingCall}>
                 <span>✕</span>
                 <span>Decline</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active In-Progress Live Call Overlay */}
+      {activeCall && (
+        <div className="incoming-call-overlay" role="dialog" aria-modal="true">
+          <div className="incoming-call-card active-call-card" style={{ borderColor: '#10B981', boxShadow: '0 24px 60px rgba(16, 185, 129, 0.25)' }}>
+            <div className="call-pulse-cluster">
+              <div className="call-ripple-ring" style={{ borderColor: 'rgba(16, 185, 129, 0.5)' }}></div>
+              <div className="call-ripple-ring" style={{ borderColor: 'rgba(16, 185, 129, 0.3)' }}></div>
+              <div className="call-avatar-circle" style={{ background: 'linear-gradient(135deg, #059669 0%, #10B981 100%)' }}>👩‍💼</div>
+            </div>
+            <div className="call-meta-stack">
+              <span className="call-incoming-label" style={{ color: '#34D399', letterSpacing: '0.08em', fontWeight: '800' }}>● LIVE CALL CONNECTED</span>
+              <h2 className="call-caller-name">{activeCall.caller}</h2>
+              <p className="call-sub-note" style={{ color: '#A7F3D0', fontWeight: '600' }}>
+                Speaking live • {formatCallDuration(activeCallDuration)}
+              </p>
+            </div>
+            <div className="call-actions-row">
+              <button
+                className="btn-call-decline"
+                style={{ minWidth: '180px', background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)', color: '#FFFFFF', borderColor: 'transparent', boxShadow: '0 8px 24px rgba(239, 68, 68, 0.4)' }}
+                onClick={handleEndActiveCall}
+              >
+                <span>🔴</span>
+                <span>End Call</span>
               </button>
             </div>
           </div>
