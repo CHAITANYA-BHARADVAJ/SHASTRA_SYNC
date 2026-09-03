@@ -1041,52 +1041,48 @@ export default function ElderScreen() {
       console.log('📬 Ingesting & Classifying Payload:', { type, action, eventType, severity, rawText });
 
       // =========================================================================
-      // 1. INCOMING CALL FROM FAMILY DASHBOARD (Teammate 4 Schema D CallInvite)
+      // 1. INCOMING CALL FROM FAMILY DASHBOARD (Schema D CallInvite or call event)
+      // Immediately pops up the Incoming Call Screen!
       // =========================================================================
-      if (type === 'callinvite' || payload.type === 'CallInvite') {
-        const callerName = payload.caller_name || 'Family (Priya)';
-        // Ignore calls initiated by the elder herself
+      const isCallRequest =
+        type === 'callinvite' ||
+        payload.type === 'CallInvite' ||
+        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_request', 'call_elder', 'start_call', 'webrtc_call', 'phone_call'].includes(type) ||
+        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'call_request'].includes(action) ||
+        ['call', 'family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
+        lowerText.includes('initiated voice call') ||
+        lowerText.includes('initiated call') ||
+        lowerText.includes('family initiated') ||
+        lowerText.includes('voice call to') ||
+        lowerText.includes('video call to') ||
+        lowerText.includes('family is calling') ||
+        lowerText.includes('priya is calling') ||
+        lowerText.includes('incoming call') ||
+        ((lowerText.includes('call') || lowerText.includes('calling')) &&
+          (lowerText.includes('priya') || lowerText.includes('family') || lowerText.includes('daughter') || lowerText.includes('mother')));
+
+      if (isCallRequest) {
+        const callerName = payload.caller || payload.caller_name || payload.sender || 'Priya (Daughter)';
+        // Reject if caller is Kamala herself
         if (callerName.includes('Kamala')) return;
 
         const callId = payload.call_id || `call_${Date.now()}`;
         if (handledCallsRef.current.has(callId)) return;
 
-        const callType = payload.call_type || 'voice';
+        const callType = (type.includes('video') || action.includes('video') || lowerText.includes('video')) ? 'video' : 'voice';
+
+        // Immediately pop up the Full-Screen Incoming Call Screen!
         setIncomingCall({
           call_id: callId,
           elder_id: payload.elder_id || ELDER_ID,
           caller: callerName,
           callType: callType,
-          message: `${callerName} is calling you live (${callType} call)`,
+          message: `${callerName} is calling you live from the Family Dashboard`,
           timestamp: Date.now(),
         });
+
         playGentleChime();
-        speak(`${callerName} is calling you on a ${callType} call. Tap green to answer.`, selectedLang);
-        return;
-      }
-
-      const isCall =
-        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_request', 'call_elder', 'start_call', 'webrtc_call', 'phone_call'].includes(type) ||
-        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'call_request'].includes(action) ||
-        ['call', 'family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
-        (payload.call_id && !handledCallsRef.current.has(payload.call_id) && (type.includes('invite') || action.includes('invite') || lowerText.includes('is calling') || lowerText.includes('incoming')));
-
-      if (isCall) {
-        const callId = payload.call_id || `call_${Date.now()}`;
-        if (handledCallsRef.current.has(callId)) return;
-
-        const callerName = payload.caller || payload.caller_name || payload.sender || 'Family (Priya)';
-        const callType = (type.includes('video') || action.includes('video') || lowerText.includes('video')) ? 'video' : 'audio';
-        setIncomingCall({
-          call_id: callId,
-          elder_id: payload.elder_id || ELDER_ID,
-          caller: callerName,
-          callType: callType,
-          message: rawText || `${callerName} is calling you live from the Family Dashboard`,
-          timestamp: Date.now(),
-        });
-        playGentleChime();
-        speak(`${callerName} is calling you live from the family dashboard. Tap green to answer.`, selectedLang);
+        speak(`${callerName} is calling you. Tap green to answer.`, selectedLang);
         return;
       }
 
