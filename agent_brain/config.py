@@ -19,7 +19,7 @@ load_dotenv()
 @dataclass(frozen=True)
 class Config:
     api_url: str
-    provider: str  # "openai" or "openrouter"
+    provider: str  # "openai" | "openrouter" | "groq"
     poll_interval: float
 
     openai_api_key: str
@@ -27,6 +27,9 @@ class Config:
 
     openrouter_api_key: str
     openrouter_model: str
+
+    groq_api_key: str
+    groq_model: str
 
     @staticmethod
     def load() -> "Config":
@@ -41,14 +44,16 @@ class Config:
             openrouter_model=os.getenv(
                 "OPENROUTER_MODEL", DEFAULT_FREE_MODELS
             ).strip(),
+            groq_api_key=os.getenv("GROQ_API_KEY", "").strip(),
+            groq_model=os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODELS).strip(),
         )
 
     def active_key(self) -> str:
-        return (
-            self.openai_api_key
-            if self.provider == "openai"
-            else self.openrouter_api_key
-        )
+        if self.provider == "openai":
+            return self.openai_api_key
+        if self.provider == "groq":
+            return self.groq_api_key
+        return self.openrouter_api_key
 
     def active_model(self) -> str:
         """The primary (first) model. Kept for display/back-compat."""
@@ -58,12 +63,14 @@ class Config:
         """
         The ordered list of models to try.
 
-        For OpenAI we just use the single configured model. For OpenRouter we
-        allow a comma-separated list so the client can fall back to another
-        FREE model if the first is rate-limited or unavailable.
+        For OpenAI we use the single configured model. For OpenRouter and Groq
+        we allow a comma-separated list so the client can fall back to another
+        model if the first is rate-limited or unavailable.
         """
         if self.provider == "openai":
             return [self.openai_model]
+        if self.provider == "groq":
+            return [m.strip() for m in self.groq_model.split(",") if m.strip()]
         return [m.strip() for m in self.openrouter_model.split(",") if m.strip()]
 
 
@@ -76,3 +83,17 @@ DEFAULT_FREE_MODELS = (
     "minimax/minimax-m3:free,"
     "nvidia/nemotron-3-super-120b-a12b:free"
 )
+
+# Groq free-tier models (fast). Falls back to the next if one is unavailable.
+DEFAULT_GROQ_MODELS = (
+    "openai/gpt-oss-120b,"
+    "openai/gpt-oss-20b,"
+    "qwen/qwen3.8-27b"
+)
+
+# OpenAI-compatible base URLs per provider.
+PROVIDER_BASE_URLS = {
+    "openrouter": "https://openrouter.ai/api/v1",
+    "groq": "https://api.groq.com/openai/v1",
+    # "openai" uses the SDK default (no base_url override).
+}

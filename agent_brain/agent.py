@@ -32,10 +32,11 @@ def _banner(config: Config) -> None:
     print(f"  Poll interval  : {config.poll_interval}s")
     print("=" * 68)
     if config.provider == "openai":
-        print("  NOTE: gpt-4o is a PAID model. If you have no credits, set")
-        print("        LLM_PROVIDER=openrouter to use a FREE model instead.")
+        print("  NOTE: gpt-4o is a PAID model. Ensure your account has credits.")
+    elif config.provider == "groq":
+        print("  Using Groq (fast). Free tier: https://console.groq.com/keys")
     else:
-        print("  Using OpenRouter FREE tier. Get a key at openrouter.ai/keys")
+        print("  Using OpenRouter free tier: https://openrouter.ai/keys")
     print()
 
 

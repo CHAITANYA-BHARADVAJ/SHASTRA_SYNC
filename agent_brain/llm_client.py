@@ -22,11 +22,9 @@ import time
 from openai import OpenAI
 from openai import APIStatusError, RateLimitError
 
-from config import Config
+from config import Config, PROVIDER_BASE_URLS
 from prompt import SYSTEM_PROMPT, build_user_prompt
 from schemas import AgentDecision, LLMDecision, SensorEvent
-
-OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # How many times to retry a single model on a transient rate-limit before
 # moving on to the next candidate model.
@@ -44,19 +42,23 @@ class LLMClient:
         if not api_key:
             raise RuntimeError(
                 f"No API key configured for provider '{config.provider}'. "
-                "Set OPENAI_API_KEY or OPENROUTER_API_KEY in your .env file."
+                "Set OPENAI_API_KEY, OPENROUTER_API_KEY, or GROQ_API_KEY in "
+                "your .env file."
             )
 
+        base_url = PROVIDER_BASE_URLS.get(config.provider)
         if config.provider == "openrouter":
             self.client = OpenAI(
                 api_key=api_key,
-                base_url=OPENROUTER_BASE_URL,
+                base_url=base_url,
                 default_headers={
                     # Optional but recommended attribution headers for OpenRouter.
                     "HTTP-Referer": "https://shastrasync.local",
                     "X-Title": "Shastra Sync - AI Brain",
                 },
             )
+        elif base_url:  # groq (and any future OpenAI-compatible provider)
+            self.client = OpenAI(api_key=api_key, base_url=base_url)
         else:  # openai
             self.client = OpenAI(api_key=api_key)
 
