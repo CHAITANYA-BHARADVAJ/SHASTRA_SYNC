@@ -1121,53 +1121,81 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 6. AI COMPANION EMPOWERED VOICE INQUIRY (Companion Check-in)
+      // 6. AI CORE DIRECT VOICE REPLIES & INQUIRIES (Teammate 2 AgentDecision)
+      // Speaks whatever the AI Core gives clearly and precisely!
+      // Displays directly in the Companion Sanctuary Card (top card with microphone)
       // =========================================================================
-      if (action === 'voice_check') {
-        const promptToSpeak = localizeMessage(rawText, selectedLang) || 'Kamala, I am checking in. How are you feeling today?';
+      const isAiCoreDecision =
+        type === 'agentdecision' ||
+        type === 'decision' ||
+        payload.type === 'AgentDecision' ||
+        Boolean(payload.voice_message_to_elder) ||
+        Boolean(payload.ai_reply) ||
+        Boolean(payload.reply_to_elder);
 
-        setAiAgentStatus({
-          action: 'voice_check',
-          message: promptToSpeak,
-          reasoning: payload.reasoning_trace || 'AI Companion wellness check-in',
-          severity: payload.severity || 'low',
-          timestamp: Date.now(),
-        });
+      if (isAiCoreDecision) {
+        // Extract the exact voice reply given by the AI Core
+        const aiVoiceReply = String(
+          payload.voice_message_to_elder ||
+          payload.ai_reply ||
+          payload.reply_to_elder ||
+          payload.family_message ||
+          payload.reasoning_trace ||
+          rawText ||
+          ''
+        ).trim();
 
-        playGentleChime();
-        setLastSpokenText(promptToSpeak);
+        if (aiVoiceReply) {
+          console.log('🤖 Speaking AI Core Voice Reply:', aiVoiceReply);
 
-        speakThenListen({
-          prompt: promptToSpeak,
-          language: selectedLang,
-          onTranscript: async (elderReply) => {
-            setLastSpokenText(elderReply);
-            playSuccessChime();
+          setAiAgentStatus({
+            action: action || 'ai_reply',
+            message: aiVoiceReply,
+            reasoning: payload.reasoning_trace || 'AI Core real-time reasoning',
+            severity: payload.severity || 'low',
+            timestamp: Date.now(),
+          });
 
-            const lower = String(elderReply || '').toLowerCase();
-            if (lower.includes('fine') || lower.includes('okay') || lower.includes('good') || lower.includes('safe')) {
-              speak('Wonderful! Glad to hear you are doing well.', selectedLang);
-            }
+          playGentleChime();
+          setLastSpokenText(aiVoiceReply);
 
-            sendMessage({
-              type: 'elder_reply_to_agent',
-              elder_id: ELDER_ID,
-              reply: elderReply,
-              timestamp: new Date().toISOString(),
+          // If AI Core requested a two-way voice check, speak then listen
+          if (action === 'voice_check') {
+            speakThenListen({
+              prompt: aiVoiceReply,
+              language: selectedLang,
+              duration: 5,
+              onTranscript: async (elderReply) => {
+                if (!elderReply) return;
+                setLastSpokenText(elderReply);
+                playSuccessChime();
+
+                sendMessage({
+                  type: 'elder_reply_to_agent',
+                  elder_id: 'kamala_001',
+                  reply: elderReply,
+                  timestamp: new Date().toISOString(),
+                });
+
+                const responseEvent = buildSensorEvent({
+                  eventType: 'voice_input',
+                  confidence: 1.0,
+                  voiceTranscript: elderReply,
+                  sender: 'Kamala Devi (Elder)',
+                });
+
+                try {
+                  await postSensorEvent(responseEvent);
+                } catch (e) {}
+              },
             });
+          } else {
+            // Speak the AI Core's reply clearly and precisely
+            speak(aiVoiceReply, selectedLang);
+          }
 
-            const responseEvent = buildSensorEvent({
-              eventType: 'voice_input',
-              confidence: 1.0,
-              voiceTranscript: elderReply,
-            });
-
-            try {
-              await postSensorEvent(responseEvent);
-            } catch (e) {}
-          },
-        });
-        return;
+          return;
+        }
       }
 
       // End of classification pipeline
@@ -1777,15 +1805,16 @@ export default function ElderScreen() {
                 ) : lastSpokenText ? (
                   <div className="companion-speech-card dialogue-confirmed">
                     <div className="speech-card-header">
-                      <span className="speech-sender-tag">🗣️ You said:</span>
+                      <span className="speech-sender-tag">
+                        {aiAgentStatus?.message === lastSpokenText ? '🤖 AI Core Reply:' : '🗣️ You said:'}
+                      </span>
                       <button
                         className="btn-replay-voice"
                         onClick={() => {
-                          const audioFeedback = `You said: "${lastSpokenText}". Your message has been delivered.`;
-                          speak(audioFeedback, selectedLang);
+                          speak(lastSpokenText, selectedLang);
                         }}
                       >
-                        {t.companionReplayBtn}
+                        🔊 Replay Voice
                       </button>
                     </div>
                     <p className="speech-transcript-text">&ldquo;{lastSpokenText}&rdquo;</p>
