@@ -36,8 +36,28 @@ export interface FamilyAlert {
   timestamp: string;
 }
 
+// Schema D: CallInvite (family -> elder, sent over WebSocket)
+// Notification-only: signals an incoming voice/video call. No media stream.
+export interface CallInvite {
+  type: "CallInvite";
+  call_id: string;
+  elder_id: string;
+  caller_name: string;
+  call_type: "voice" | "video";
+  timestamp: string;
+}
+
+// Schema E: CallResponse (elder -> family, sent over WebSocket)
+export interface CallResponse {
+  type: "CallResponse";
+  call_id: string;
+  elder_id: string;
+  response: "accepted" | "declined";
+  timestamp: string;
+}
+
 // Union type for all possible WebSocket messages
-export type WebSocketMessage = AgentDecision | FamilyAlert;
+export type WebSocketMessage = AgentDecision | FamilyAlert | CallInvite | CallResponse;
 
 // Internal alert type for the dashboard (enriched with local data)
 export interface DashboardAlert {

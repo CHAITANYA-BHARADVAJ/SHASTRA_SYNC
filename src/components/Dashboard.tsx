@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useWebSocket, ConnectionStatus } from "@/hooks/useWebSocket";
 import { useSettings } from "@/context/SettingsContext";
@@ -53,6 +53,8 @@ export function Dashboard() {
     clearAllAlerts, 
     clearAlert,
     reconnect,
+    triggerTestAlert,
+    sendMessage,
     stats 
   } = useWebSocket(settings.soundEnabled, settings.soundVolume);
 
@@ -70,6 +72,16 @@ export function Dashboard() {
     status: "all",
     search: "",
   });
+
+  // Show unread alert count in the browser tab title so families notice
+  // alerts even when viewing another tab.
+  useEffect(() => {
+    const base = "Shastra Sync — Family Dashboard";
+    document.title = stats.unacknowledged > 0 ? `(${stats.unacknowledged}) ${base}` : base;
+    return () => {
+      document.title = base;
+    };
+  }, [stats.unacknowledged]);
 
   // Filter alerts
   const filteredAlerts = useMemo(() => {
@@ -260,6 +272,7 @@ export function Dashboard() {
                     elderId={elderProfile.id}
                     elderAddress={elderProfile.address}
                     onToast={handleQuickActionToast}
+                    sendMessage={sendMessage}
                   />
                 </div>
 
@@ -458,6 +471,10 @@ export function Dashboard() {
       <SettingsPanel
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
+        onTestAlert={() => {
+          triggerTestAlert();
+          showToast({ type: "warning", title: "Test Alert Fired", message: "Playing SOS siren — check your sound and notifications." });
+        }}
       />
 
       {/* Profile Panel */}

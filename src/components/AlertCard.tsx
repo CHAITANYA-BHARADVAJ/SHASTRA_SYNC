@@ -17,6 +17,7 @@ import {
   Hash
 } from "lucide-react";
 import { DashboardAlert } from "@/types/alerts";
+import { useNow } from "@/hooks/useNow";
 
 interface AlertCardProps {
   alert: DashboardAlert;
@@ -28,6 +29,7 @@ interface AlertCardProps {
 export function AlertCard({ alert, onAcknowledge, onDismiss, index = 0 }: AlertCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const now = useNow(); // ticks every 30s so "Xm ago" stays fresh
 
   // Portal target is only available on the client
   useEffect(() => {
@@ -80,7 +82,6 @@ export function AlertCard({ alert, onAcknowledge, onDismiss, index = 0 }: AlertC
   const Icon = config.icon;
 
   const formatTime = (date: Date) => {
-    const now = new Date();
     const diff = now.getTime() - new Date(date).getTime();
     const minutes = Math.floor(diff / 60000);
     

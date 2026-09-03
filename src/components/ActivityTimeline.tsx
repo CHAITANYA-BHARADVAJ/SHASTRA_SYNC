@@ -12,6 +12,7 @@ import {
   MoreHorizontal
 } from "lucide-react";
 import { ActivityEvent } from "@/types/alerts";
+import { useNow } from "@/hooks/useNow";
 
 interface ActivityTimelineProps {
   activities: ActivityEvent[];
@@ -19,6 +20,8 @@ interface ActivityTimelineProps {
 }
 
 export function ActivityTimeline({ activities, maxItems = 8 }: ActivityTimelineProps) {
+  const now = useNow(); // ticks every 30s so relative times stay fresh
+
   const getActivityConfig = (type: string, severity?: string) => {
     switch (type) {
       case "fall":
@@ -76,7 +79,6 @@ export function ActivityTimeline({ activities, maxItems = 8 }: ActivityTimelineP
   };
 
   const formatTime = (date: Date) => {
-    const now = new Date();
     const diff = now.getTime() - new Date(date).getTime();
     const minutes = Math.floor(diff / 60000);
     

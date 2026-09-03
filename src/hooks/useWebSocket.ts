@@ -18,6 +18,7 @@ export interface UseWebSocketReturn {
   clearAlert: (id: string) => void;
   reconnect: () => void;
   sendMessage: (message: object) => void;
+  triggerTestAlert: () => void;
   stats: {
     totalAlerts: number;
     criticalAlerts: number;
@@ -39,42 +40,85 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     console.log("WebSocket URL configured:", WS_URL);
   }, []);
 
-  // Play notification sound for ALL alert severities (each with a distinct tone)
+  // Reusable AudioContext (created lazily after a user gesture / first alert)
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  const getAudioContext = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    if (!audioContextRef.current) {
+      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return null;
+      audioContextRef.current = new AudioContextClass();
+    }
+    // Resume if the browser suspended it (autoplay policy)
+    if (audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch(() => {});
+    }
+    return audioContextRef.current;
+  }, []);
+
+  // Play notification sound for ALL alert severities.
+  // Critical = looping SOS siren wail; others = distinct beeps.
   const playAlertSound = useCallback((severity: string) => {
     if (!soundEnabled) return;
 
     try {
-      const AudioContextClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      const audioContext = new AudioContextClass();
+      const audioContext = getAudioContext();
+      if (!audioContext) return;
 
-      const playBeep = (freq: number, delay: number, duration: number = 0.3) => {
+      const now = audioContext.currentTime;
+
+      // Simple beep helper (sine)
+      const playBeep = (freq: number, delay: number, duration: number = 0.3, type: OscillatorType = "sine") => {
         const oscillator = audioContext.createOscillator();
         const gainNode = audioContext.createGain();
-
         oscillator.connect(gainNode);
         gainNode.connect(audioContext.destination);
-
         oscillator.frequency.value = freq;
-        oscillator.type = "sine";
-
-        const startTime = audioContext.currentTime + delay;
+        oscillator.type = type;
+        const startTime = now + delay;
         gainNode.gain.setValueAtTime(volume * 0.5, startTime);
         gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration);
-
         oscillator.start(startTime);
         oscillator.stop(startTime + duration);
       };
 
-      // Distinct sound pattern per severity level
+      // A single siren "wail": frequency ramps up then down, harsher timbre.
+      const playWail = (delay: number, wailDuration: number = 0.8) => {
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        oscillator.type = "sawtooth"; // siren-like
+
+        const startTime = now + delay;
+        const mid = startTime + wailDuration / 2;
+        const end = startTime + wailDuration;
+
+        // Wail 600 -> 1200 -> 600 Hz
+        oscillator.frequency.setValueAtTime(600, startTime);
+        oscillator.frequency.linearRampToValueAtTime(1200, mid);
+        oscillator.frequency.linearRampToValueAtTime(600, end);
+
+        // Envelope
+        gainNode.gain.setValueAtTime(0.0001, startTime);
+        gainNode.gain.exponentialRampToValueAtTime(volume * 0.6, startTime + 0.05);
+        gainNode.gain.setValueAtTime(volume * 0.6, end - 0.1);
+        gainNode.gain.exponentialRampToValueAtTime(0.0001, end);
+
+        oscillator.start(startTime);
+        oscillator.stop(end);
+      };
+
       switch (severity) {
         case "critical":
-          // Urgent triple high beep
-          playBeep(880, 0);
-          playBeep(880, 0.15);
-          playBeep(1100, 0.3);
+          // SOS siren: 3 rising-falling wails back to back
+          playWail(0, 0.8);
+          playWail(0.85, 0.8);
+          playWail(1.7, 0.8);
           break;
         case "high":
-          // Double beep, rising
+          // Rising double beep
           playBeep(660, 0);
           playBeep(880, 0.2);
           break;
@@ -91,7 +135,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     } catch (error) {
       console.warn("Could not play alert sound:", error);
     }
-  }, [soundEnabled, volume]);
+  }, [soundEnabled, volume, getAudioContext]);
 
   // Request browser notification permission
   useEffect(() => {
@@ -299,6 +343,33 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     }
   }, []);
 
+  // Fire a local sample critical alert so families can verify sound + notification.
+  // This does NOT hit the backend; it's a local test only.
+  const triggerTestAlert = useCallback(() => {
+    const id = `test-${Date.now()}`;
+    const testAlert: DashboardAlert = {
+      id,
+      message: "TEST: This is a sample critical alert to check your sound and notifications.",
+      severity: "critical",
+      reasoning_trace: "Triggered manually from Settings to verify the SOS siren and browser notification are working.",
+      timestamp: new Date(),
+      acknowledged: false,
+    };
+    const testActivity: ActivityEvent = {
+      id: `activity-${id}`,
+      type: "alert",
+      title: "CRITICAL Alert (Test)",
+      description: testAlert.message,
+      timestamp: new Date(),
+      severity: "critical",
+    };
+    setAlerts((prev) => [testAlert, ...prev]);
+    setActivities((prev) => [testActivity, ...prev].slice(0, 50));
+
+    playAlertSound("critical");
+    showBrowserNotification("CRITICAL Alert (Test) - Shastra Sync", testAlert.message, "critical");
+  }, [playAlertSound, showBrowserNotification]);
+
   // Calculate stats
   const stats = {
     totalAlerts: alerts.length,
@@ -334,6 +405,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     clearAlert,
     reconnect,
     sendMessage,
+    triggerTestAlert,
     stats,
   };
 }

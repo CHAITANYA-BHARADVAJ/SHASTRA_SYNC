@@ -14,13 +14,15 @@ import {
   Shield,
   User,
   ChevronRight,
-  Check
+  Check,
+  Siren
 } from "lucide-react";
 import { useSettings } from "@/context/SettingsContext";
 
 interface SettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onTestAlert?: () => void;
 }
 
 const languages = [
@@ -32,7 +34,7 @@ const languages = [
   { code: "kn", name: "Kannada", native: "ಕನ್ನಡ" },
 ];
 
-export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ isOpen, onClose, onTestAlert }: SettingsPanelProps) {
   const { settings, updateSettings } = useSettings();
   const [activeSection, setActiveSection] = useState<string | null>(null);
 
@@ -231,6 +233,26 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                       />
                     </div>
                   </motion.button>
+
+                  {/* Test Alert - fires a sample critical alert to verify sound + notification */}
+                  {onTestAlert && (
+                    <motion.button
+                      onClick={() => {
+                        onTestAlert();
+                      }}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      className="w-full flex items-center gap-4 p-4 rounded-xl bg-[#ef4444]/10 border border-[#ef4444]/20 hover:bg-[#ef4444]/15 transition-colors"
+                    >
+                      <div className="w-10 h-10 rounded-xl bg-[#ef4444]/20 flex items-center justify-center">
+                        <Siren className="w-5 h-5 text-[#ef4444]" />
+                      </div>
+                      <div className="flex-1 text-left">
+                        <p className="text-sm font-medium text-[#ef4444]">Test Critical Alert</p>
+                        <p className="text-xs text-[var(--text-muted)]">Play the SOS siren & send a sample notification</p>
+                      </div>
+                    </motion.button>
+                  )}
                 </div>
               </div>
 

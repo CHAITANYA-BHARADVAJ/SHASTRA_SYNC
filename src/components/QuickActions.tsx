@@ -18,6 +18,7 @@ import { MessageComposer } from "./MessageComposer";
 import { LocationTracker } from "./LocationTracker";
 import { ScheduleManager } from "./ScheduleManager";
 import { sendFamilyMessage, sendEmergency, sendEvent } from "@/services/api";
+import { CallInvite } from "@/types/alerts";
 
 interface QuickActionsProps {
   elderName: string;
@@ -26,15 +27,33 @@ interface QuickActionsProps {
   elderId: string;
   elderAddress?: string;
   onToast: (type: "success" | "error", title: string, message?: string) => void;
+  sendMessage?: (message: object) => void;
 }
 
-export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, elderAddress = "123 Gandhi Nagar, Chennai", onToast }: QuickActionsProps) {
+export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, elderAddress = "123 Gandhi Nagar, Chennai", onToast, sendMessage }: QuickActionsProps) {
   const [showEmergencyConfirm, setShowEmergencyConfirm] = useState(false);
   const [showMessageComposer, setShowMessageComposer] = useState(false);
   const [showLocationTracker, setShowLocationTracker] = useState(false);
   const [showScheduleManager, setShowScheduleManager] = useState(false);
 
+  // Broadcast a CallInvite over the WebSocket so the elder dashboard rings.
+  const sendCallInvite = (callType: "voice" | "video") => {
+    if (!sendMessage) return;
+    const invite: CallInvite = {
+      type: "CallInvite",
+      call_id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      elder_id: elderId,
+      caller_name: "Family",
+      call_type: callType,
+      timestamp: new Date().toISOString(),
+    };
+    sendMessage(invite);
+  };
+
   const handleCall = async () => {
+    // Notify the elder dashboard (rings there)
+    sendCallInvite("voice");
+
     // Log call event to backend
     const result = await sendEvent({
       elder_id: elderId,
@@ -50,6 +69,9 @@ export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, e
   };
 
   const handleVideoCall = async () => {
+    // Notify the elder dashboard (rings there)
+    sendCallInvite("video");
+
     // Log video call event to backend
     const result = await sendEvent({
       elder_id: elderId,
