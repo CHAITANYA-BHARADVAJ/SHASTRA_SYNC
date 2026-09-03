@@ -20,18 +20,12 @@ So this module supports two providers, switchable with one env var:
 | `LLM_PROVIDER` | Model | Cost |
 |----------------|-------|------|
 | `openai`       | `gpt-4o` | Paid (needs OpenAI credits) |
-| `openrouter`   | a rotation of `:free` models (default) | **Free** |
+| `openrouter`   | `meta-llama/llama-3.3-70b-instruct:free` (default) | **Free** |
 
 [OpenRouter](https://openrouter.ai) exposes many models through an
 OpenAI-compatible API, including several with a `:free` suffix that cost $0.
-Get a free key at https://openrouter.ai/keys.
-
-**Free models share a rate-limited pool**, so any single one can be busy (HTTP
-429) at a given moment. To handle this, `OPENROUTER_MODEL` accepts a
-**comma-separated list** of models. The agent tries them in order, retries
-briefly on rate limits, and automatically falls back to the next model until
-one responds. Free models also come and go — check the current free list at
-https://openrouter.ai/models?max_price=0 and update the list if needed.
+Get a free key at https://openrouter.ai/keys. The default is set to a capable
+free model so you can run the whole system without paying.
 
 > Both paths use the exact same `AgentDecision` contract, and the hard business
 > rules (fall → high/voice_check, panic → critical/call_emergency) are enforced
@@ -88,9 +82,10 @@ prompt builder. No network or API key required.
 | `hub_client.py` | HTTP client for the Hub (`/api/events/pending`, `/api/decisions`) |
 | `config.py`     | Loads `.env` configuration |
 | `selftest.py`   | Offline verification |
-| `Procfile`      | Process definition for Render/Railway (`worker: python agent.py`) |
+| `Procfile`      | Process definition for Railway (`worker: python agent.py`) |
+| `railway.json`  | Railway build/deploy config |
 | `runtime.txt`   | Pins the Python version for the cloud builder |
-| `../render.yaml`| Render Blueprint (repo root) — defines the background worker |
+| `../render.yaml`| Render Blueprint (repo root) — defines the free web service |
 
 ---
 
@@ -100,20 +95,43 @@ The agent is a **background worker** (it loops forever, no web page), so deploy
 it as a *Background Worker*, not a Web Service.
 
 ### Render (recommended)
+## Deploying (run it 24/7 in the cloud)
+
+The brain is a forever-polling loop. `agent.py` adapts to the host:
+- If a `PORT` env var is set (Render web service), it serves a tiny health
+  endpoint on that port and runs the polling loop in a background thread.
+- If not (local / Railway worker), it just runs the loop.
+
+The decision logic is identical either way.
+
+### Render (free tier — Web Service)
+Render's free plan only offers **Web Services**, so we deploy as one.
+
 1. Push this repo to GitHub.
-2. On https://render.com : **New → Blueprint**, and select your repo. Render
-   reads `render.yaml` and creates the `shastra-sync-brain` worker automatically.
-   (Or **New → Background Worker** manually with Root Dir `agent_brain`,
-   build `pip install -r requirements.txt`, start `python agent.py`.)
+2. On https://render.com : **New → Blueprint** → select your repo → pick the
+   branch `teammate2-agent-brain`. Render reads `render.yaml` and creates the
+   `shastra-sync-brain` web service automatically.
+   (Or **New → Web Service** manually: Root Dir `agent_brain`, build
+   `pip install -r requirements.txt`, start `python agent.py`.)
 3. In the service's **Environment** tab, add the secret:
-   `OPENROUTER_API_KEY = <your key>`  (the other vars come from `render.yaml`).
-4. Deploy. The worker now polls the live Hub forever.
+   `GROQ_API_KEY = <your gsk_... key>`  (the rest come from `render.yaml`).
+4. Deploy. Visit the service URL — you should see a JSON status like
+   `{"service":"shastra-sync-brain","status":"alive",...}`.
+
+> **Keep it awake:** Render free web services sleep after ~15 min with no HTTP
+> traffic, which pauses polling. Add a free pinger (e.g. https://uptimerobot.com)
+> that GETs your service URL every 5 minutes so the brain keeps running.
+
+### Railway (alternative — true background worker, no sleep)
+Railway supports background workers, so no health-server/keep-alive is needed.
+Deploy from GitHub, set Root Directory `agent_brain`, and add the env vars
+(`API_URL`, `LLM_PROVIDER=groq`, `GROQ_API_KEY`, `GROQ_MODEL`,
+`POLL_INTERVAL_SECONDS`). It picks up `railway.json` / `Procfile` automatically.
 
 > The `.env` file is git-ignored and never leaves your machine. In the cloud,
 > configuration comes from the dashboard environment variables instead.
 
-### Note on the free LLM tier
-Free OpenRouter models are rate-limited and slow. For a smooth always-on
-deployment, add a few dollars of OpenRouter credit or switch to a paid OpenAI
-key (`LLM_PROVIDER=openai`, `OPENAI_API_KEY=...`). The code supports both with
-no changes — just different env vars.
+### Note on the LLM provider
+Default is **Groq** (fast + free tier). The code also supports OpenAI (`gpt-4o`,
+paid) and OpenRouter (free models) — just change `LLM_PROVIDER` and the matching
+key/model env vars. No code changes needed.

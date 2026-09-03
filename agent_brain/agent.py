@@ -7,12 +7,23 @@ A continuous background loop:
      (structured output -> AgentDecision).
   3. POST the AgentDecision back to the Hub, which stores + broadcasts it.
 
-Run:  python agent.py
+Run locally:  python agent.py
+
+Deployment note:
+  The core brain is the polling loop below. Cloud hosts that only offer FREE
+  *web* services (e.g. Render free tier) require a process that listens on a
+  port. So when a PORT env var is present, we ALSO start a tiny health-check
+  HTTP server and run the polling loop in a background thread. On hosts that
+  support background workers (Railway), PORT is absent and we just run the
+  loop directly. Either way the decision logic is identical.
 """
 
 from __future__ import annotations
 
+import os
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import requests
 
@@ -20,6 +31,9 @@ from config import Config
 from hub_client import HubClient
 from llm_client import LLMClient
 from schemas import SensorEvent
+
+# Simple shared state so the health endpoint can report liveness.
+_STATE = {"polls": 0, "decisions": 0, "started_at": time.time(), "last_error": None}
 
 
 def _banner(config: Config) -> None:
@@ -71,13 +85,15 @@ def process_event(
 
     try:
         hub.post_decision(decision)
+        _STATE["decisions"] += 1
         print(f"[hub] decision {decision.decision_id} sent.\n")
     except Exception as exc:  # noqa: BLE001
         print(f"[hub] failed to post decision: {exc}")
         seen.discard(event.event_id)  # retry next poll
 
 
-def main() -> None:
+def run_agent_loop() -> None:
+    """The core brain: poll the Hub, decide, and post back, forever."""
     config = Config.load()
     _banner(config)
 
@@ -92,14 +108,67 @@ def main() -> None:
     while True:
         try:
             events = hub.get_pending_events()
+            _STATE["polls"] += 1
+            _STATE["last_error"] = None
             for event in events:
                 process_event(event, llm, hub, seen)
         except requests.exceptions.ConnectionError:
+            _STATE["last_error"] = "cannot reach hub"
             print(f"[hub] cannot reach {config.api_url} - is Teammate 1 running?")
         except Exception as exc:  # noqa: BLE001
+            _STATE["last_error"] = str(exc)
             print(f"[loop] unexpected error: {exc}")
 
         time.sleep(config.poll_interval)
+
+
+# --------------------------------------------------------------------------- #
+# Tiny health-check web server (only used when a PORT is provided by the host)
+# --------------------------------------------------------------------------- #
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802 - http.server API
+        uptime = int(time.time() - _STATE["started_at"])
+        body = (
+            '{"service":"shastra-sync-brain","status":"alive",'
+            f'"uptime_seconds":{uptime},'
+            f'"polls":{_STATE["polls"]},'
+            f'"decisions":{_STATE["decisions"]},'
+            f'"last_error":{_json_str(_STATE["last_error"])}}}'
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):  # silence per-request logging noise
+        return
+
+
+def _json_str(value) -> str:
+    if value is None:
+        return "null"
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _serve_health(port: int) -> None:
+    server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
+    print(f"[health] listening on 0.0.0.0:{port} (GET / -> status JSON)")
+    server.serve_forever()
+
+
+def main() -> None:
+    port = os.getenv("PORT")
+    if port:
+        # Web-service mode (e.g. Render free tier): run the brain in a
+        # background thread and serve the health endpoint on the main thread.
+        loop = threading.Thread(target=run_agent_loop, daemon=True)
+        loop.start()
+        _serve_health(int(port))
+    else:
+        # Worker mode (local / Railway): just run the brain.
+        run_agent_loop()
 
 
 if __name__ == "__main__":

@@ -1,31 +1,37 @@
 # ==========================================================================
-# Render deployment for Teammate 2 - The AI Brain (background worker).
+# Render deployment for Teammate 2 - The AI Brain.
 #
-# This defines a Background Worker (no web port) that runs the polling agent
-# 24/7 against the live Hub. Render reads this file from the repo ROOT.
+# Render's FREE plan only offers Web Services (must listen on a port), so this
+# runs as a `web` service. agent.py detects the PORT env var Render provides,
+# serves a tiny health endpoint on it, and runs the polling brain in a
+# background thread. The decision logic is identical to worker mode.
 #
-# After connecting the repo in the Render dashboard, set the secret env vars
-# (marked sync: false below) in the service's "Environment" tab. Do NOT put
-# your API key in this file - it lives only in the dashboard.
+# Render reads this file from the repo ROOT. After connecting the repo, set
+# the secret env vars (sync: false) in the service's "Environment" tab.
+#
+# NOTE: Render free web services sleep after ~15 min of no HTTP traffic. To
+# keep the brain polling 24/7, add a free uptime pinger (e.g. UptimeRobot)
+# that GETs the service URL every 5 minutes.
 # ==========================================================================
 services:
-  - type: worker
+  - type: web
     name: shastra-sync-brain
     runtime: python
     plan: free
     rootDir: agent_brain
     buildCommand: pip install -r requirements.txt
     startCommand: python agent.py
+    healthCheckPath: /
     autoDeploy: true
     envVars:
       - key: API_URL
         value: https://shastra-sync.onrender.com
       - key: LLM_PROVIDER
-        value: openrouter
-      - key: OPENROUTER_MODEL
-        value: z-ai/glm-5.2:free,google/gemma-4-31b-it:free,google/gemma-4-26b-a4b-it:free,minimax/minimax-m3:free,nvidia/nemotron-3-super-120b-a12b:free
+        value: groq
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b
       - key: POLL_INTERVAL_SECONDS
         value: "2"
       # Secret - do NOT hardcode. Set this in the Render dashboard.
-      - key: OPENROUTER_API_KEY
+      - key: GROQ_API_KEY
         sync: false
