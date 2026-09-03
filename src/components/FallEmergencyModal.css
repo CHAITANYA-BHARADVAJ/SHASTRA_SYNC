@@ -1,0 +1,243 @@
+/* ============================================================
+   FallEmergencyModal.css — Liquid Glass Urgent Emergency Overlay
+   ============================================================ */
+
+.emergency-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(3, 7, 18, 0.85);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  animation: modal-fade-in 0.3s ease;
+}
+
+@keyframes modal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.emergency-modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 620px;
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.4) 0%, rgba(15, 23, 42, 0.9) 100%);
+  backdrop-filter: blur(32px);
+  -webkit-backdrop-filter: blur(32px);
+  border: 2px solid rgba(251, 113, 133, 0.6);
+  border-radius: 36px;
+  padding: 38px 30px;
+  text-align: center;
+  box-shadow: 0 0 90px rgba(225, 29, 72, 0.5), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+  animation: modal-scale-up 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes modal-scale-up {
+  from { transform: scale(0.85); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.emergency-beacon-header {
+  position: relative;
+  width: 76px;
+  height: 76px;
+  margin: 0 auto 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.beacon-icon {
+  font-size: 42px;
+  z-index: 2;
+  animation: beacon-shake 0.8s infinite;
+}
+
+.beacon-ring {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 2.5px solid #FB7185;
+  animation: beacon-ring-pulse 1.3s infinite;
+}
+
+@keyframes beacon-ring-pulse {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+@keyframes beacon-shake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-8deg); }
+  75% { transform: rotate(8deg); }
+}
+
+.emergency-title {
+  font-size: 42px;
+  font-weight: 900;
+  color: #FFFFFF;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  text-shadow: 0 0 25px rgba(225, 29, 72, 0.7);
+}
+
+.emergency-hindi-title {
+  font-size: 24px;
+  font-weight: 700;
+  color: #FECDD3;
+  margin-top: 6px;
+}
+
+.emergency-reason-text {
+  font-size: 16px;
+  color: #E2E8F0;
+  margin: 16px 0 22px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 18px;
+  border-radius: 16px;
+}
+
+/* 30s Countdown Display */
+.emergency-countdown-box {
+  background: rgba(225, 29, 72, 0.2);
+  border: 1.5px solid rgba(251, 113, 133, 0.4);
+  border-radius: 24px;
+  padding: 18px;
+  margin-bottom: 24px;
+  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.2);
+}
+
+.countdown-number {
+  font-size: 58px;
+  font-weight: 900;
+  color: #FB7185;
+  line-height: 1;
+  text-shadow: 0 0 25px rgba(251, 113, 133, 0.6);
+}
+
+.countdown-label {
+  font-size: 12px;
+  font-weight: 800;
+  color: #FDA4AF;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 6px 0 12px;
+}
+
+.countdown-bar-bg {
+  width: 100%;
+  height: 10px;
+  background: rgba(0, 0, 0, 0.4);
+  border-radius: 100px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.countdown-bar-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #FBBF24 0%, #F43F5E 100%);
+  border-radius: 100px;
+  box-shadow: 0 0 12px rgba(244, 63, 94, 0.8);
+  transform-origin: left;
+  transition: transform 1s linear;
+}
+
+/* Big Action Choice Buttons */
+.emergency-actions-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.btn-modal-safe,
+.btn-modal-help {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 24px;
+  border-radius: 24px;
+  border: 1.5px solid transparent;
+  cursor: pointer;
+  text-align: left;
+  min-height: 84px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.btn-modal-safe:active,
+.btn-modal-help:active {
+  transform: scale(0.97);
+}
+
+.btn-modal-icon {
+  font-size: 34px;
+  flex-shrink: 0;
+}
+
+.btn-modal-text {
+  display: flex;
+  flex-direction: column;
+}
+
+.btn-modal-safe {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.5) 0%, rgba(6, 78, 59, 0.7) 100%);
+  color: #FFFFFF;
+  border-color: rgba(52, 211, 153, 0.6);
+  box-shadow: 0 8px 30px rgba(16, 185, 129, 0.35), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.btn-modal-safe .modal-primary {
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.btn-modal-safe .modal-secondary {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.btn-modal-help {
+  background: linear-gradient(135deg, rgba(225, 29, 72, 0.6) 0%, rgba(159, 18, 57, 0.8) 100%);
+  color: #FFFFFF;
+  border-color: rgba(251, 113, 133, 0.7);
+  box-shadow: 0 8px 30px rgba(225, 29, 72, 0.45), inset 0 1px 2px rgba(255, 255, 255, 0.4);
+}
+
+.btn-modal-help .modal-primary {
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.btn-modal-help .modal-secondary {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+@media (max-width: 480px) {
+  .emergency-modal-card {
+    padding: 26px 20px;
+    border-radius: 28px;
+  }
+  .emergency-title {
+    font-size: 32px;
+  }
+  .emergency-hindi-title {
+    font-size: 18px;
+  }
+  .countdown-number {
+    font-size: 44px;
+  }
+  .btn-modal-safe .modal-primary,
+  .btn-modal-help .modal-primary {
+    font-size: 20px;
+  }
+}

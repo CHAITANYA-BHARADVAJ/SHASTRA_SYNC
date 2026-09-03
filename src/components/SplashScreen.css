@@ -1,0 +1,232 @@
+/* ============================================================
+   APPLE DESIGN SYSTEM // SPLASH & INITIALIZATION SCREEN
+   Deep Space Black • Apple Titanium Glassmorphism • SF Pro
+   ============================================================ */
+
+.apple-splash-root {
+  position: fixed;
+  inset: 0;
+  background-color: #0C0D12;
+  background-image: 
+    radial-gradient(circle at 50% 35%, rgba(245, 158, 11, 0.15) 0%, transparent 60%),
+    radial-gradient(circle at 50% 100%, rgba(251, 146, 60, 0.08) 0%, transparent 60%),
+    linear-gradient(180deg, #10121A 0%, #0C0D12 100%);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", "Inter", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  transition: opacity 0.65s cubic-bezier(0.25, 1, 0.5, 1), transform 0.65s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.apple-splash-fade-out {
+  opacity: 0;
+  transform: scale(1.05);
+  pointer-events: none;
+}
+
+/* Ambient Diffuse Background Glows */
+.splash-ambient-halo {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.halo-blue {
+  width: 480px;
+  height: 480px;
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.2) 0%, transparent 70%);
+  top: 20%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.halo-cyan {
+  width: 360px;
+  height: 360px;
+  background: radial-gradient(circle, rgba(251, 146, 60, 0.15) 0%, transparent 70%);
+  bottom: 15%;
+  left: 50%;
+  transform: translate(-50%, 50%);
+}
+
+/* Center Glass Console */
+.apple-splash-container {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 440px;
+  width: 90%;
+  padding: 36px 28px;
+}
+
+/* Apple Titanium Shield Centerpiece */
+.splash-shield-cluster {
+  position: relative;
+  width: 120px;
+  height: 120px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 28px;
+}
+
+.splash-ripple-wave {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid rgba(245, 158, 11, 0.4);
+  pointer-events: none;
+}
+
+.wave-1 {
+  animation: apple-ripple 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.wave-2 {
+  animation: apple-ripple 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite 1.2s;
+}
+
+@keyframes apple-ripple {
+  0% { transform: scale(0.85); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.splash-shield-core {
+  position: relative;
+  width: 84px;
+  height: 84px;
+  border-radius: 26px;
+  background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%);
+  border: 2px solid #FFFFFF;
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 35px rgba(245, 158, 11, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  animation: shield-float 3s ease-in-out infinite alternate;
+}
+
+@keyframes shield-float {
+  0% { transform: translateY(0); }
+  100% { transform: translateY(-4px); }
+}
+
+.shield-specular-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 50%;
+  border-radius: 24px 24px 0 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35) 0%, transparent 100%);
+  pointer-events: none;
+}
+
+.icon-splash-shield {
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+}
+
+/* Brand Typography */
+.splash-brand-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 32px;
+}
+
+.splash-app-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: #FFFFFF;
+  letter-spacing: 0.06em;
+  margin: 0;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6), 0 0 30px rgba(245, 158, 11, 0.35);
+}
+
+.splash-app-tagline {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #94A3B8;
+  margin: 6px 0 0;
+  letter-spacing: -0.01em;
+}
+
+/* Apple Fluid Progress Bar */
+.splash-progress-wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 28px;
+}
+
+.splash-progress-track {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.splash-progress-fill {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, #F59E0B 0%, #D97706 100%);
+  border-radius: 9999px;
+  box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
+  transform-origin: left;
+  transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.splash-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.splash-stage-text {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #BFDBFE;
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+
+.splash-percent-text {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #FFFFFF;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Bottom Security Badge */
+.splash-security-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #86868B;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 14px;
+  border-radius: 9999px;
+}
+
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #30D158;
+  box-shadow: 0 0 8px #30D158;
+}

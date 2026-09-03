@@ -1,0 +1,55 @@
+.connection-banner {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-family: var(--font-main);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: background-color 0.5s ease, color 0.5s ease;
+}
+
+.banner-connected {
+  background-color: rgba(16, 185, 129, 0.15);
+  color: #10B981;
+}
+
+.banner-reconnecting {
+  background-color: rgba(245, 158, 11, 0.15);
+  color: #F59E0B;
+  animation: banner-pulse 2s ease-in-out infinite;
+}
+
+.banner-disconnected {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #EF4444;
+}
+
+.banner-icon {
+  font-size: 10px;
+  line-height: 1;
+}
+
+.banner-reconnecting .banner-icon {
+  animation: spin 1.5s linear infinite;
+}
+
+.banner-label {
+  white-space: nowrap;
+}
+
+@keyframes banner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -1,0 +1,16 @@
+{
+  "short_name": "SHASTRA Care",
+  "name": "SHASTRA SYNC • Senior Home Safety & Medical Guardian",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0B111E",
+  "theme_color": "#0D9488",
+  "display": "standalone",
+  "orientation": "any"
+}
