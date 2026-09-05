@@ -18,6 +18,7 @@ import { MessageComposer } from "./MessageComposer";
 import { LocationTracker } from "./LocationTracker";
 import { ScheduleManager } from "./ScheduleManager";
 import { sendFamilyMessage, sendEmergency, sendEvent } from "@/services/api";
+import { useFamilyMember } from "@/hooks/useFamilyMember";
 
 interface QuickActionsProps {
   elderName: string;
@@ -30,17 +31,19 @@ interface QuickActionsProps {
 }
 
 export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, elderAddress = "123 Gandhi Nagar, Chennai", onToast, registerSentMessage }: QuickActionsProps) {
+  const { familyMember } = useFamilyMember();
   const [showEmergencyConfirm, setShowEmergencyConfirm] = useState(false);
   const [showMessageComposer, setShowMessageComposer] = useState(false);
   const [showLocationTracker, setShowLocationTracker] = useState(false);
   const [showScheduleManager, setShowScheduleManager] = useState(false);
 
   const handleCall = async () => {
-    // Log call event to backend
+    // Send as voice_input (the path that reaches the elder / teammate 3) with
+    // the caller's current profile name.
     const result = await sendEvent({
       elder_id: elderId,
-      event_type: "normal",
-      voice_transcript: `Family initiated voice call to ${elderName}`,
+      event_type: "voice_input",
+      voice_transcript: `${familyMember.name} is calling ${elderName.split(" ")[0]}`,
     });
     
     if (result.success) {
@@ -51,11 +54,10 @@ export function QuickActions({ elderName, elderPhone, emergencyPhone, elderId, e
   };
 
   const handleVideoCall = async () => {
-    // Log video call event to backend
     const result = await sendEvent({
       elder_id: elderId,
-      event_type: "normal",
-      voice_transcript: `Family initiated video call to ${elderName}`,
+      event_type: "voice_input",
+      voice_transcript: `${familyMember.name} is starting a video call with ${elderName.split(" ")[0]}`,
     });
     
     if (result.success) {

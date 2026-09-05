@@ -175,8 +175,8 @@ export function Dashboard() {
       onCall={async () => {
         const result = await sendEvent({
           elder_id: elderProfile.id,
-          event_type: "normal",
-          voice_transcript: `Family initiated voice call to ${elderProfile.name}`,
+          event_type: "voice_input",
+          voice_transcript: `${familyMember.name} is calling ${elderProfile.name.split(" ")[0]}`,
         });
         if (result.success) {
           showToast({ type: "info", title: "Calling", message: `Calling ${elderProfile.name.split(" ")[0]} at ${elderProfile.phone}...` });
@@ -187,8 +187,8 @@ export function Dashboard() {
       onVideo={async () => {
         const result = await sendEvent({
           elder_id: elderProfile.id,
-          event_type: "normal",
-          voice_transcript: `Family initiated video call to ${elderProfile.name}`,
+          event_type: "voice_input",
+          voice_transcript: `${familyMember.name} is starting a video call with ${elderProfile.name.split(" ")[0]}`,
         });
         if (result.success) {
           showToast({ type: "info", title: "Video Call", message: `Starting video call with ${elderProfile.name.split(" ")[0]}...` });
@@ -492,8 +492,8 @@ export function Dashboard() {
           showToast({ type: "info", title: "Calling", message: `Calling ${firstName}...` });
           const result = await sendEvent({
             elder_id: elderProfile.id,
-            event_type: "normal",
-            voice_transcript: `Family initiated call to ${elderProfile.name}`,
+            event_type: "voice_input",
+            voice_transcript: `${familyMember.name} is calling ${firstName}`,
           });
           if (!result.success) {
             showToast({ type: "error", title: "Call Failed", message: result.error || "Could not reach the backend." });
@@ -504,8 +504,8 @@ export function Dashboard() {
           showToast({ type: "info", title: "Video Call", message: `Starting video call with ${firstName}...` });
           const result = await sendEvent({
             elder_id: elderProfile.id,
-            event_type: "normal",
-            voice_transcript: `Family initiated video call to ${elderProfile.name}`,
+            event_type: "voice_input",
+            voice_transcript: `${familyMember.name} is starting a video call with ${firstName}`,
           });
           if (!result.success) {
             showToast({ type: "error", title: "Video Call Failed", message: result.error || "Could not reach the backend." });
