@@ -84,8 +84,18 @@ export function FallEmergencyModal({
 
       timerRef.current = setInterval(() => {
         setSecondsRemaining((prev) => {
+          if (hasEscalatedRef.current) {
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            return 0;
+          }
           if (prev <= 1) {
-            clearInterval(timerRef.current);
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
             if (!hasEscalatedRef.current) {
               hasEscalatedRef.current = true;
               setIsEscalated(true);

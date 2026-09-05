@@ -480,15 +480,6 @@ export default function ElderScreen() {
   // Strict once-only emergency latch: guarantee exactly ONE emergency request is sent per incident
   const hasSentEmergencyRef = useRef(false);
 
-  // Failsafe: only while fall emergency countdown modal is actively open on screen, suppress call popups
-  useEffect(() => {
-    if (fallModalOpen) {
-      if (incomingCall) setIncomingCall(null);
-      if (activeCall) setActiveCall(null);
-      if (outgoingCall) setOutgoingCall(null);
-    }
-  }, [fallModalOpen, incomingCall, activeCall, outgoingCall]);
-
   // Pure derived localization for active alert message: 0ms latency on language switch
   const displayedAlertMessage = rawAlertMessage
     ? (localizeMessage(rawAlertMessage, selectedLang) || t.alertSub)
@@ -552,7 +543,8 @@ export default function ElderScreen() {
       return;
     }
     // 2. Do not re-trigger if modal is already active
-    if (fallModalOpenRef.current && (isEmergencyEscalated || !escalateDirectly)) {
+    if (fallModalOpenRef.current || emergencyActiveRef.current) {
+      console.log('🛡️ Fall alert modal already active — ignoring re-trigger');
       return;
     }
 
@@ -664,19 +656,9 @@ export default function ElderScreen() {
     // Register in dedup set so own event does not loop back to elder
     processedDecisionsRef.current.add(eventId);
 
-    // Exactly ONE WebSocket Broadcast to Teammate 4 Family Dashboard
-    sendMessage({
-      type: 'manual_panic',
-      elder_id: ELDER_ID,
-      event_type: 'manual_panic',
-      severity: 'critical',
-      alert: alertMsg,
-      message: alertMsg,
-      reason: reasonText,
-      timestamp: new Date().toISOString(),
-    });
-
     // Exactly ONE Hub REST API POST
+    // The Hub backend processes this event and broadcasts the authoritative
+    // AgentDecision and FamilyAlert to the Family Dashboard without duplicate requests.
     const payload = buildSensorEvent({
       eventType: 'manual_panic',
       severity: 'critical',
@@ -690,7 +672,17 @@ export default function ElderScreen() {
       await postSensorEvent(payload);
       console.log('✓ Emergency SensorEvent dispatched once to Hub:', eventId);
     } catch (e) {
-      console.warn('Failed to post emergency event to Hub:', e);
+      console.warn('Failed to post emergency event to Hub, using WebSocket fallback:', e);
+      sendMessage({
+        type: 'manual_panic',
+        elder_id: ELDER_ID,
+        event_type: 'manual_panic',
+        severity: 'critical',
+        alert: alertMsg,
+        message: alertMsg,
+        reason: reasonText,
+        timestamp: new Date().toISOString(),
+      });
     }
   }, [sendMessage, elderProfile]);
 
@@ -1412,6 +1404,68 @@ export default function ElderScreen() {
         return;
       }
 
+      // =========================================================================
+      // 0b. INCOMING CALL FROM FAMILY DASHBOARD (Teammate 4 / Family Call)
+      // Must be evaluated FIRST so family calls are NEVER blocked or missed!
+      // =========================================================================
+      const inviteMsg =
+        (typeof payload.family_message === 'string' && payload.family_message.includes('CALL_INVITE'))
+          ? payload.family_message
+          : (typeof rawText === 'string' && rawText.includes('CALL_INVITE'))
+            ? rawText
+            : (typeof payload.message === 'string' && payload.message.includes('CALL_INVITE'))
+              ? payload.message
+              : '';
+
+      const isCallInvite =
+        Boolean(inviteMsg) ||
+        type === 'callinvite' ||
+        type === 'call_invite' ||
+        payload.type === 'CallInvite' ||
+        payload.type === 'call_invite' ||
+        allTextHaystack.includes('call_invite') ||
+        (payload.action === 'call' && (payload.caller_name || payload.sender));
+
+      if (isCallInvite) {
+        const currentElderName = (elderProfile?.name || 'Kamala Devi').toLowerCase();
+        if (
+          lowerText.includes('elder initiated phone call') ||
+          lowerText.includes('calling priya') ||
+          lowerText.includes(`${currentElderName} is calling`) ||
+          (payload.caller_name && payload.caller_name.toLowerCase().includes(currentElderName)) ||
+          activeCallRef.current !== null // Cannot receive another call if already connected!
+        ) {
+          return;
+        }
+
+        let callerName = payload.caller_name || payload.sender || familyContactName || 'Family';
+        let callType = payload.call_type || 'voice';
+        let callId = payload.call_id || payload.decision_id || `call_${Date.now()}`;
+
+        if (inviteMsg) {
+          const parts = inviteMsg.split(':');
+          if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
+          if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
+          if (parts[3] && parts[3].trim()) callId = parts[3].trim();
+        } else if (payload.call_type === 'video') {
+          callType = 'video';
+        }
+
+        console.log('📞 INCOMING CALL POP UP TRIGGERED FROM FAMILY DASHBOARD:', { callId, callerName, callType });
+
+        setIncomingCall({
+          call_id: callId,
+          elder_id: payload.elder_id || ELDER_ID,
+          caller: callerName,
+          callType: callType,
+          message: `${callerName} is calling you live from the Family Dashboard`,
+          timestamp: Date.now(),
+        });
+
+        playPhoneRing();
+        return;
+      }
+
       // Safe / Alert Cancellation broadcasts from elder tablet or caregiver
       if (
         type === 'alert_cancelled' ||
@@ -1547,6 +1601,12 @@ export default function ElderScreen() {
         (isEmergencyAction || isEmergencySeverity || isEmergencyType || hasEmergencyKeyword);
 
       if (isCriticalEmergency) {
+        // Strict loop guard: if emergency is already active or already sent, do NOT re-trigger
+        if (fallModalOpenRef.current || emergencyActiveRef.current || hasSentEmergencyRef.current) {
+          console.log('🛡️ Emergency already active / dispatched — suppressing duplicate trigger');
+          return;
+        }
+
         console.log('🚨 Critical Emergency Detected — Enabling Privilege Escalation Modal:', {
           action,
           severity,
@@ -1572,42 +1632,10 @@ export default function ElderScreen() {
         return;
       }
 
-      // Do NOT process self-initiated calls or already handled calls
-      const currentElderName = (elderProfile?.name || 'Kamala Devi').toLowerCase();
-      if (
-        lowerText.includes('elder initiated phone call') ||
-        lowerText.includes('calling priya') ||
-        lowerText.includes(`${currentElderName} is calling`) ||
-        lowerText.includes(`${currentElderName} pressed sos`) ||
-        (payload.caller_name && payload.caller_name.toLowerCase().includes(currentElderName)) ||
-        (payload.call_id && handledCallsRef.current.has(payload.call_id)) ||
-        activeCallRef.current !== null // Cannot receive another call if already connected!
-      ) {
-        return;
-      }
-
-      const inviteMsg =
-        (typeof payload.family_message === 'string' && payload.family_message.includes('CALL_INVITE'))
-          ? payload.family_message
-          : (typeof rawText === 'string' && rawText.includes('CALL_INVITE'))
-            ? rawText
-            : (typeof payload.message === 'string' && payload.message.includes('CALL_INVITE'))
-              ? payload.message
-              : '';
+      const isCallRequest = false;
 
       // Deduplication guard for non-emergency messages
-      const isCallCandidate =
-        !isCriticalEmergency &&
-        (
-          Boolean(inviteMsg) ||
-          type === 'callinvite' ||
-          type === 'call_invite' ||
-          payload.type === 'CallInvite' ||
-          payload.type === 'call_invite' ||
-          allTextHaystack.includes('call_invite')
-        );
-
-      if (!isCallCandidate && dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
+      if (dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
       if (dedupKey) {
         processedDecisionsRef.current.add(dedupKey);
         setTimeout(() => {
@@ -1618,76 +1646,10 @@ export default function ElderScreen() {
       console.log('📬 Ingesting & Classifying Non-Emergency Payload:', { type, action, eventType, severity, rawText });
 
       // =========================================================================
-      // 2. INCOMING CALL FROM FAMILY DASHBOARD (Teammate / Family Call)
-      // Displays the Full-Screen Incoming Call Overlay with Ringing Audio!
-      // =========================================================================
-
-      // Only suppress call if the fall emergency modal is currently open on screen
-      if (isCallCandidate && fallModalOpen) {
-        if (payload.call_id) handledCallsRef.current.add(payload.call_id);
-        return;
-      }
-
-      const isCallRequest =
-        isCallCandidate &&
-        !fallModalOpen &&
-        !isCriticalEmergency &&
-        action !== 'call_emergency' &&
-        action !== 'emergency_escalate' &&
-        severity !== 'critical' &&
-        (
-          (Boolean(inviteMsg) && !inviteMsg.toLowerCase().includes('system') && !inviteMsg.toLowerCase().includes(currentElderName)) ||
-          ((type === 'callinvite' || type === 'call_invite') && payload.caller_name && !payload.caller_name.toLowerCase().includes('system') && !payload.caller_name.toLowerCase().includes(currentElderName)) ||
-          (payload.type === 'CallInvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes('system') && !payload.caller_name.toLowerCase().includes(currentElderName)) ||
-          Boolean(inviteMsg)
-        );
-
-      if (isCallRequest) {
-        let callerName = payload.caller_name || payload.sender || familyContactName || 'Priya (Daughter)';
-        let callType = 'voice';
-        let callId = payload.call_id || payload.decision_id || `call_${Date.now()}`;
-
-        if (inviteMsg) {
-          const parts = inviteMsg.split(':');
-          if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
-          if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
-          if (parts[3] && parts[3].trim()) callId = parts[3].trim();
-        } else if (payload.call_type === 'video') {
-          callType = 'video';
-        }
-
-        if (handledCallsRef.current.has(callId)) return;
-        handledCallsRef.current.add(callId);
-
-        // Auto-release callId after 20s so future calls can be received
-        setTimeout(() => {
-          handledCallsRef.current.delete(callId);
-        }, 20000);
-
-        console.log('📞 Triggering Incoming Call Pop Up:', { callId, callerName, callType });
-
-        // Immediately pop up the Full-Screen Incoming Calling Screen!
-        setIncomingCall({
-          call_id: callId,
-          elder_id: payload.elder_id || ELDER_ID,
-          caller: callerName || 'Priya (Daughter)',
-          callType: callType,
-          message: `${callerName || 'Priya (Daughter)'} is calling you live from the Family Dashboard`,
-          timestamp: Date.now(),
-        });
-
-        // Ring audio phone tone
-        playPhoneRing();
-        return;
-      }
-
-      // =========================================================================
       // 3. HOSTED AI AGENT DECISION (Teammate 2 AgentDecision / LLM Agent Reply)
       // Processes voice replies from the hosted brain and speaks to the elder!
       // =========================================================================
       const isAiAgentDecision =
-        !isCallRequest &&
-        !inviteMsg &&
         (type === 'agentdecision' ||
         payload.type === 'AgentDecision' ||
         type === 'decision' ||
@@ -1702,6 +1664,10 @@ export default function ElderScreen() {
 
         // 3a. Check if action requires critical life-safety escalation
         if (action === 'call_emergency' || action === 'emergency_escalate' || action === 'escalate_112' || severity === 'critical') {
+          if (fallModalOpenRef.current || emergencyActiveRef.current || hasSentEmergencyRef.current) {
+            console.log('🛡️ Emergency already active — skipping duplicate AI decision trigger');
+            return;
+          }
           setActiveCall(null);
           setIncomingCall(null);
           setOutgoingCall(null);
@@ -1738,6 +1704,10 @@ export default function ElderScreen() {
           lowerReply.includes('need help');
 
         if (isEmergencyVoice) {
+          if (fallModalOpenRef.current || emergencyActiveRef.current || hasSentEmergencyRef.current) {
+            console.log('🛡️ Emergency already active — skipping AI voice trigger');
+            return;
+          }
           setActiveCall(null);
           setIncomingCall(null);
           setOutgoingCall(null);
@@ -2002,17 +1972,11 @@ export default function ElderScreen() {
             continue;
           }
 
-          // Strict lockout check: NO calls allowed if an emergency occurred recently
-          if (Date.now() < emergencyLockedUntilRef.current) {
-            if (evt.call_id) handledCallsRef.current.add(evt.call_id);
-            continue;
-          }
-
           const evtTimestamp = evt.timestamp ? new Date(evt.timestamp).getTime() : 0;
-          const isEvtFresh = Date.now() - evtTimestamp < 15000; // Must be fresh within 15 seconds
+          const isTooOld = evtTimestamp > 0 && (Date.now() - evtTimestamp > 60000);
+          if (isTooOld) continue;
 
           const isCallEvent =
-            isEvtFresh &&
             (
               evt.type === 'CallInvite' ||
               evt.type === 'callinvite' ||
@@ -2885,7 +2849,7 @@ export default function ElderScreen() {
       </button>
 
       {/* Incoming Family Call Modal Overlay */}
-      {incomingCall && !fallModalOpen && (
+      {incomingCall && (
         <div className="incoming-call-overlay" role="dialog" aria-modal="true">
           <div className="incoming-call-card">
             <div className="call-pulse-cluster">
@@ -2913,7 +2877,7 @@ export default function ElderScreen() {
       )}
 
       {/* Active In-Progress Live Call Overlay */}
-      {activeCall && !fallModalOpen && (
+      {activeCall && (
         <div className="incoming-call-overlay" role="dialog" aria-modal="true">
           <div className="incoming-call-card active-call-card" style={{ borderColor: '#10B981', boxShadow: '0 24px 60px rgba(16, 185, 129, 0.25)' }}>
             <div className="call-pulse-cluster">
