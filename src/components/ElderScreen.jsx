@@ -472,7 +472,9 @@ export default function ElderScreen() {
   const lastTalkTimeRef = useRef(0);
   // Cooldown guard: suppress new alerts for N ms after user dismisses one
   const alertDismissedAtRef = useRef(0);
-  const ALERT_COOLDOWN_MS = 12000; // 12-second cooldown after dismissal
+  const ALERT_COOLDOWN_MS = 30000; // 30-second rock-solid cooldown after dismissal
+  const fallModalOpenRef = useRef(false);
+  fallModalOpenRef.current = fallModalOpen;
 
   // Pure derived localization for active alert message: 0ms latency on language switch
   const displayedAlertMessage = rawAlertMessage
@@ -529,6 +531,17 @@ export default function ElderScreen() {
    * Displays compassionate "Did you fall? Are you fine?" prompt and speaks to senior.
    */
   const triggerFallAlert = useCallback((customReason) => {
+    // 1. Active cooldown protection: elder just pressed "I AM OKAY"
+    const timeSinceDismissal = Date.now() - alertDismissedAtRef.current;
+    if (timeSinceDismissal < ALERT_COOLDOWN_MS) {
+      console.log(`🛡️ Suppressing fall alert: elder confirmed safe ${Math.round(timeSinceDismissal / 1000)}s ago (cooldown: ${ALERT_COOLDOWN_MS / 1000}s)`);
+      return;
+    }
+    // 2. Do not re-trigger if modal is already active
+    if (fallModalOpenRef.current) {
+      return;
+    }
+
     const name = elderProfile?.name?.split(' ')[0] || 'Kamala';
     const empatheticPrompt = `${name}, did you fall? Are you fine? Please confirm if you are okay.`;
     setFallReason(customReason || empatheticPrompt);
@@ -539,7 +552,7 @@ export default function ElderScreen() {
 
   /**
    * Reset the active backend emergency/escalation mode.
-   * Sets a cooldown timestamp so the polling loop won't immediately re-trigger.
+   * Sets a 30s cooldown timestamp and resolves the alert cleanly.
    */
   const handleFallModalSafe = useCallback(async () => {
     stop();
@@ -553,13 +566,13 @@ export default function ElderScreen() {
     setEscalationTierKey('tier1');
     setEscalationSecondsLeft(15);
 
-    // Mark cooldown so polling / WS won't re-trigger the same alert immediately
+    // 1. Mark cooldown so polling / WS won't re-trigger the same alert immediately
     alertDismissedAtRef.current = Date.now();
 
     playGentleChime();
     speak(t.fineConfirmationTts, selectedLang);
 
-    // Broadcast cancel/safe status via WebSocket to Family Dashboard & Hub
+    // 2. Broadcast cancel/safe status via WebSocket to Family Dashboard & Hub
     sendMessage({
       type: 'alert_cancelled',
       elder_id: ELDER_ID,
@@ -568,15 +581,21 @@ export default function ElderScreen() {
       timestamp: new Date().toISOString(),
     });
 
+    // 3. Post resolved decision to Hub so family dashboard clears alert banner cleanly
     try {
-      const payload = buildSensorEvent({
-        eventType: 'voice_input',
-        confidence: 1.0,
-        voiceTranscript: 'User confirmed: I am safe, cancel emergency alert.',
+      await postDecision({
+        type: 'AgentDecision',
+        decision_id: `safe_${Date.now()}`,
+        event_id: `evt_safe_${Date.now()}`,
+        severity: 'low',
+        action: 'monitor',
+        reasoning_trace: 'Elder Kamala Devi explicitly confirmed "I AM OKAY". Life-safety alert cancelled and resolved.',
+        voice_message_to_elder: 'I am glad you are safe and comfortable.',
+        language_code: 'en-IN',
+        family_message: '✓ Kamala confirmed: I am safe and comfortable. Emergency alert cancelled.',
       });
-      await postSensorEvent(payload);
     } catch (e) {
-      console.warn('Failed to post safe confirmation event to Hub:', e);
+      console.warn('Failed to post safe confirmation to Hub:', e);
     }
   }, [stop, speak, selectedLang, t, sendMessage]);
 
@@ -1350,6 +1369,22 @@ export default function ElderScreen() {
         return;
       }
 
+      // Safe / Alert Cancellation broadcasts from elder tablet or caregiver
+      if (
+        type === 'alert_cancelled' ||
+        payload.type === 'alert_cancelled' ||
+        payload.status === 'safe' ||
+        lowerText.includes('alert cancelled') ||
+        lowerText.includes('confirmed: i am safe') ||
+        lowerText.includes('cancel emergency')
+      ) {
+        setFallModalOpen(false);
+        setBackendAlertActive(false);
+        setSosSent(false);
+        alertDismissedAtRef.current = Date.now();
+        return;
+      }
+
       // Profile sync handshake and family profile updates
       if (rawText.startsWith('PROFILE_SYNC:') || payload.family_message?.startsWith('PROFILE_SYNC:')) {
         return; // Silent: don't speak or alert own profile broadcasts
@@ -1858,8 +1893,16 @@ export default function ElderScreen() {
             break;
           }
 
-          // Also route other pending events to classifier
-          classifyAndDispatchMessage(evt);
+          // Route only family messages/notes to classifier (NEVER route pending sensor events which cause emergency echo loops!)
+          if (
+            evt.type === 'family_message' ||
+            evt.family_message ||
+            allEvtText.includes('family_message') ||
+            allEvtText.includes('family_note') ||
+            (evt.sender && String(evt.sender).toLowerCase().includes('priya') && !allEvtText.includes('fall'))
+          ) {
+            classifyAndDispatchMessage(evt);
+          }
         }
       } catch (err) {
         // Silent network retry
