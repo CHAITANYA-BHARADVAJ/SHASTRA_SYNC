@@ -54,6 +54,34 @@ export function playGentleChime() {
   }
 }
 
+export function playPhoneRing() {
+  try {
+    const ctx = getAudioContext();
+    const now = ctx.currentTime;
+
+    const burst = (start) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(480, start);
+      osc.frequency.setValueAtTime(620, start + 0.2);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.25, start + 0.02);
+      gain.gain.setValueAtTime(0.25, start + 0.38);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.4);
+      osc.start(start);
+      osc.stop(start + 0.42);
+    };
+
+    burst(now);
+    burst(now + 0.48);
+  } catch (e) {
+    console.warn('Phone ring audio skipped:', e);
+  }
+}
+
 /**
  * Urgent two-tone medical alert for Emergency SOS or Fall Detection.
  */

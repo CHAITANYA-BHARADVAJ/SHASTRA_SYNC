@@ -5,7 +5,7 @@ import { useCheckInScheduler } from '../hooks/useCheckInScheduler';
 import CheckInCard from './CheckInCard';
 import { FallEmergencyModal } from './FallEmergencyModal';
 import { postSensorEvent, postDecision, fetchLatestEvents, fetchLatestDecisions } from '../api/api';
-import { playEmergencyAlarm, playGentleChime, playSuccessChime } from '../utils/audioChimes';
+import { playEmergencyAlarm, playGentleChime, playSuccessChime, playPhoneRing } from '../utils/audioChimes';
 import { localizeMessage, getLocalizedTierLabel } from '../utils/translator';
 import ElderProfileView from './ElderProfileView';
 import { generateCompanionDecision, dispatchCompanionDecision } from '../services/ElderAiCompanionService';
@@ -402,6 +402,16 @@ export default function ElderScreen() {
     const secs = seconds % 60;
     return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }, []);
+
+  // Looping phone ring audio while an incoming family call is ringing
+  useEffect(() => {
+    if (!incomingCall) return;
+    playPhoneRing();
+    const ringInterval = setInterval(() => {
+      playPhoneRing();
+    }, 2500);
+    return () => clearInterval(ringInterval);
+  }, [incomingCall]);
 
   const [familyAck, setFamilyAck] = useState(null); // { acknowledgedBy: string, message: string, timestamp: number }
   const [aiAgentStatus, setAiAgentStatus] = useState(null); // { action: string, message: string, reasoning: string }
@@ -1238,11 +1248,30 @@ export default function ElderScreen() {
         }
       }
 
+      // Combine all potential message fields into a single search text
+      const allTextHaystack = [
+        payload.family_message,
+        payload.voice_transcript,
+        payload.transcript,
+        payload.voice_message_to_elder,
+        payload.ai_reply,
+        payload.reply_to_elder,
+        payload.voice_reply,
+        payload.message,
+        payload.text,
+        payload.raw,
+        payload.note,
+        payload.reasoning_trace,
+        payload.reason,
+      ].filter(Boolean).join(' ').toLowerCase();
+
       const rawText = String(
         payload.family_message ||
         payload.voice_transcript ||
         payload.transcript ||
         payload.voice_message_to_elder ||
+        payload.ai_reply ||
+        payload.reply_to_elder ||
         payload.message ||
         payload.text ||
         payload.raw ||
@@ -1258,7 +1287,7 @@ export default function ElderScreen() {
       const eventType = String(payload.event_type || payload.event || '').toLowerCase();
       const severity = String(payload.severity || '').toLowerCase();
 
-      // Deduplication guard
+      // Deduplication guard (call invites must NEVER be suppressed by deduplication!)
       const dedupKey = payload.decision_id
         ? `dec_${payload.decision_id}`
         : payload.alert_id
@@ -1269,8 +1298,20 @@ export default function ElderScreen() {
         ? null
         : `${type}_${action}_${(payload.message || payload.text || rawText).slice(0, 30)}_${payload.timestamp || ''}`;
 
-      if (dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
-      if (dedupKey) processedDecisionsRef.current.add(dedupKey);
+      const isCallCandidate =
+        allTextHaystack.includes('call') ||
+        allTextHaystack.includes('calling') ||
+        type.includes('call') ||
+        action.includes('call') ||
+        eventType.includes('call');
+
+      if (!isCallCandidate && dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
+      if (dedupKey) {
+        processedDecisionsRef.current.add(dedupKey);
+        setTimeout(() => {
+          processedDecisionsRef.current.delete(dedupKey);
+        }, 20000);
+      }
 
       // =========================================================================
       // 0. CALL RESPONSES, TERMINATIONS & ECHOES (NEVER TRIGGER INCOMING CALL ALERT)
@@ -1371,32 +1412,22 @@ export default function ElderScreen() {
       // Deep inspection: Was a call initiated by family, even if summarized by backend AI?
       const isCallKeywordsPresent =
         Boolean(inviteMsg) ||
-        lowerText.includes('call_invite') ||
-        lowerText.includes('initiated voice call') ||
-        lowerText.includes('initiated video call') ||
-        lowerText.includes('initiated a call') ||
-        lowerText.includes('initiated call') ||
-        lowerText.includes('family initiated call') ||
-        lowerText.includes('family is calling') ||
-        lowerText.includes('priya is calling') ||
-        lowerText.includes('incoming call') ||
-        lowerFamilyMsg.includes('family-initiated call') ||
-        lowerFamilyMsg.includes('initiated a call') ||
-        lowerFamilyMsg.includes('initiated call') ||
-        lowerFamilyMsg.includes('family is calling') ||
-        lowerFamilyMsg.includes('calling kamala') ||
-        lowerReasoning.includes('family member initiated a call') ||
-        lowerReasoning.includes('family-initiated call') ||
-        lowerReasoning.includes('initiated a call') ||
-        lowerReasoning.includes('initiated voice call') ||
-        lowerReasoning.includes('initiated video call') ||
-        lowerReasoning.includes('initiated call') ||
-        lowerVoiceMsg.includes('family called') ||
-        lowerVoiceMsg.includes('see your family called') ||
-        lowerVoiceMsg.includes('family is calling') ||
-        lowerTranscript.includes('initiated voice call') ||
-        lowerTranscript.includes('initiated video call') ||
-        lowerTranscript.includes('initiated call');
+        allTextHaystack.includes('call_invite') ||
+        allTextHaystack.includes('is calling') ||
+        allTextHaystack.includes('calling you') ||
+        allTextHaystack.includes('calling kamala') ||
+        allTextHaystack.includes('initiated voice call') ||
+        allTextHaystack.includes('initiated video call') ||
+        allTextHaystack.includes('initiated a call') ||
+        allTextHaystack.includes('initiated call') ||
+        allTextHaystack.includes('family initiated call') ||
+        allTextHaystack.includes('family is calling') ||
+        allTextHaystack.includes('priya is calling') ||
+        allTextHaystack.includes('incoming call') ||
+        allTextHaystack.includes('family-initiated call') ||
+        allTextHaystack.includes('family called') ||
+        allTextHaystack.includes('incoming voice call') ||
+        allTextHaystack.includes('incoming video call');
 
       const isCallRequest =
         Boolean(inviteMsg) ||
@@ -1408,11 +1439,9 @@ export default function ElderScreen() {
         isCallKeywordsPresent;
 
       if (isCallRequest) {
-        let callerName = 'Priya (Daughter)';
+        let callerName = payload.caller_name || payload.sender || 'Priya (Daughter)';
         let callType = (
-          lowerReasoning.includes('video') ||
-          lowerFamilyMsg.includes('video') ||
-          lowerText.includes('video') ||
+          allTextHaystack.includes('video') ||
           type.includes('video') ||
           action.includes('video')
         ) ? 'video' : 'voice';
@@ -1423,10 +1452,28 @@ export default function ElderScreen() {
           if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
           if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
           if (parts[3] && parts[3].trim()) callId = parts[3].trim();
+        } else {
+          const rawAll = [
+            payload.voice_message_to_elder,
+            payload.ai_reply,
+            payload.reply_to_elder,
+            payload.family_message,
+            payload.reasoning_trace,
+            rawText,
+          ].filter(Boolean).join(' ');
+          const match = rawAll.match(/(?:see\s+|from\s+|that\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+calling/);
+          if (match && match[1] && !match[1].toLowerCase().includes('family')) {
+            callerName = match[1].trim();
+          }
         }
 
         if (handledCallsRef.current.has(callId)) return;
         handledCallsRef.current.add(callId);
+
+        // Auto-release callId after 20s so future calls are never suppressed
+        setTimeout(() => {
+          handledCallsRef.current.delete(callId);
+        }, 20000);
 
         console.log('📞 Triggering Calling Screen Overlay for Call Request:', { callId, callerName, callType });
 
@@ -1434,14 +1481,14 @@ export default function ElderScreen() {
         setIncomingCall({
           call_id: callId,
           elder_id: payload.elder_id || ELDER_ID,
-          caller: 'Priya (Daughter)',
+          caller: callerName || 'Priya (Daughter)',
           callType: callType,
-          message: 'Priya (Daughter) is calling you live from the Family Dashboard',
+          message: `${callerName || 'Priya (Daughter)'} is calling you live from the Family Dashboard`,
           timestamp: Date.now(),
         });
 
-        // Ring audio chime only (NO speech prompt, NO AI voice output message)
-        playGentleChime();
+        // Ring audio phone tone
+        playPhoneRing();
         return;
       }
 
@@ -1484,6 +1531,37 @@ export default function ElderScreen() {
           reply: aiVoiceReply,
           reasoning: payload.reasoning_trace,
         });
+
+        // Fail-safe check: If AI message announces an incoming call, trigger call screen immediately
+        const lowerReply = aiVoiceReply.toLowerCase();
+        const isCallInAiSpeech =
+          lowerReply.includes('calling') ||
+          lowerReply.includes('is calling') ||
+          lowerReply.includes('calling you') ||
+          lowerReply.includes('initiated a call') ||
+          lowerReply.includes('voice call') ||
+          lowerReply.includes('video call');
+
+        if (isCallInAiSpeech) {
+          console.log('📞 Fail-Safe: Incoming call announced by AI Companion voice reply:', aiVoiceReply);
+          let caller = 'Priya (Daughter)';
+          const match = aiVoiceReply.match(/(?:see\s+|from\s+|that\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+is\s+calling/);
+          if (match && match[1] && !match[1].toLowerCase().includes('family')) {
+            caller = match[1].trim();
+          }
+          const callId = payload.call_id || payload.decision_id || `call_${Date.now()}`;
+          const isVideo = lowerReply.includes('video');
+          setIncomingCall({
+            call_id: callId,
+            elder_id: payload.elder_id || ELDER_ID,
+            caller: caller,
+            callType: isVideo ? 'video' : 'voice',
+            message: `${caller} is calling you live from the Family Dashboard`,
+            timestamp: Date.now(),
+          });
+          playPhoneRing();
+          return;
+        }
 
         if (aiVoiceReply) {
           const isAlreadySpoken = Boolean(
@@ -1695,6 +1773,7 @@ export default function ElderScreen() {
     [selectedLang, t, speak, speakThenListen, sendMessage]
   );
 
+  classifyAndDispatchRef.current = classifyAndDispatchMessage;
   useEffect(() => {
     classifyAndDispatchRef.current = classifyAndDispatchMessage;
   }, [classifyAndDispatchMessage]);
@@ -1714,6 +1793,82 @@ export default function ElderScreen() {
     }
   }, [lastMessage, classifyAndDispatchMessage]);
 
+  // Live Event Polling: catches calls/events posted to /api/events by Family Dashboard (Teammate 4)
+  // Guarantees call pop-up within ~1s even when WebSocket does not relay client frames
+  const pollHandledEventsRef = useRef(new Set());
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const events = await fetchLatestEvents();
+        if (!Array.isArray(events) || events.length === 0) return;
+
+        for (const evt of events) {
+          const evtId = evt.event_id || `${evt.event_type}_${evt.timestamp || ''}`;
+          if (pollHandledEventsRef.current.has(evtId)) continue;
+          pollHandledEventsRef.current.add(evtId);
+          setTimeout(() => pollHandledEventsRef.current.delete(evtId), 60000);
+
+          const allEvtText = [
+            evt.voice_transcript,
+            evt.message,
+            evt.text,
+            evt.transcript,
+            evt.event_type,
+            evt.type,
+          ].filter(Boolean).join(' ').toLowerCase();
+
+          const isCallEvent =
+            allEvtText.includes('initiated voice call') ||
+            allEvtText.includes('initiated video call') ||
+            allEvtText.includes('initiated a call') ||
+            allEvtText.includes('initiated call') ||
+            allEvtText.includes('family initiated call') ||
+            allEvtText.includes('is calling') ||
+            allEvtText.includes('calling you') ||
+            allEvtText.includes('calling kamala') ||
+            allEvtText.includes('call invite') ||
+            allEvtText.includes('call_invite') ||
+            evt.event_type === 'call' ||
+            evt.event_type === 'video_call' ||
+            evt.event_type === 'voice_call' ||
+            evt.type === 'CallInvite';
+
+          if (isCallEvent) {
+            const isVideo = allEvtText.includes('video') || evt.event_type === 'video_call';
+            const callType = isVideo ? 'video' : 'voice';
+            const callerName = evt.caller_name || evt.sender || 'Priya (Daughter)';
+            const callId = evt.call_id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+            if (handledCallsRef.current.has(callId)) continue;
+            handledCallsRef.current.add(callId);
+            setTimeout(() => handledCallsRef.current.delete(callId), 30000);
+
+            console.log('📞 Live Pending Call Event Detected from Family:', { callId, callerName, callType });
+
+            setIncomingCall({
+              call_id: callId,
+              elder_id: evt.elder_id || ELDER_ID,
+              caller: callerName,
+              callType: callType,
+              message: `${callerName} is calling you live from the Family Dashboard`,
+              timestamp: Date.now(),
+            });
+
+            playPhoneRing();
+            break;
+          }
+
+          // Also route other pending events to classifier
+          classifyAndDispatchMessage(evt);
+        }
+      } catch (err) {
+        // Silent network retry
+      }
+    }, 1200);
+
+    return () => clearInterval(pollInterval);
+  }, [classifyAndDispatchMessage]);
+
   // Simulation Handlers for Team Demonstration & Testing
   const simulateIncomingFamilyMessage = useCallback((sender = 'Priya (Daughter)', text = 'Had lunch Amma? Taking my break now, visiting this evening! ❤️') => {
     setFamilyMessage({
@@ -1727,10 +1882,16 @@ export default function ElderScreen() {
   }, [selectedLang, speak]);
 
   const simulateIncomingFamilyCall = useCallback((caller = 'Priya (Daughter)') => {
-    setIncomingCall({ caller, timestamp: Date.now() });
-    playGentleChime();
-    speak(`${caller} is calling you from the family dashboard.`, selectedLang);
-  }, [selectedLang, speak]);
+    setIncomingCall({
+      call_id: `call_${Date.now()}`,
+      elder_id: ELDER_ID,
+      caller,
+      callType: 'voice',
+      message: `${caller} is calling you live from the Family Dashboard`,
+      timestamp: Date.now(),
+    });
+    playPhoneRing();
+  }, []);
 
   const simulateFamilyAcknowledgment = useCallback((acknowledgedBy = 'Priya (Daughter)', message = "Priya acknowledged: 'On my way home Amma! Hang tight.'") => {
     setFamilyAck({ acknowledgedBy, message, timestamp: Date.now() });
