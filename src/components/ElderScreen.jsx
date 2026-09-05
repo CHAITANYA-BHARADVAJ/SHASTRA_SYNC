@@ -1178,6 +1178,42 @@ export default function ElderScreen() {
           return;
         }
 
+        // 1b. Immediate check for vocal emergency / distress / critical mention
+        const emergencyKeywords = [
+          'help', 'fell', 'fallen', 'fall', 'hurt', 'pain', 'chest', 'dizzy', 'faint', 'fainting',
+          'breath', 'breathing', 'bleeding', 'emergency', 'critical', 'ambulance', 'hospital', '112',
+          'madad', 'gira', 'gir', 'dard', 'chakkar', 'chhati', 'saans', 'takleef', 'chot',
+          'sahaya', 'biddiddene', 'novoo', 'thale tiruguttide', 'usiru', 'kashta'
+        ];
+        const isCriticalVocal = emergencyKeywords.some((kw) => lower.includes(kw));
+        if (isCriticalVocal) {
+          console.log('🚨 Critical distress mention detected in elder voice:', transcript);
+          setActiveCall(null);
+          setIncomingCall(null);
+          setOutgoingCall(null);
+          triggerFallAlert(transcript);
+
+          const panicPayload = buildSensorEvent({
+            eventType: 'manual_panic',
+            confidence: 1.0,
+            voiceTranscript: transcript,
+            sender: 'Kamala Devi (Elder)',
+          });
+          try {
+            postSensorEvent(panicPayload);
+          } catch (e) {}
+
+          sendMessage({
+            type: 'manual_panic',
+            elder_id: ELDER_ID,
+            action: 'call_emergency',
+            severity: 'critical',
+            transcript: transcript,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+
         // 2. Set UI indicator: waiting for hosted LLM agent
         setAiAgentStatus({
           action: 'voice_check',
@@ -1225,6 +1261,14 @@ export default function ElderScreen() {
               eventId: payload.event_id,
             });
 
+            if (fallbackDecision?.severity === 'critical' || fallbackDecision?.action === 'call_emergency') {
+              setActiveCall(null);
+              setIncomingCall(null);
+              setOutgoingCall(null);
+              triggerFallAlert(fallbackDecision?.voice_message_to_elder || transcript);
+              return;
+            }
+
             const replyMsg = fallbackDecision?.voice_message_to_elder || 'Hello Kamala ji, I am right here with you.';
             setAiAgentStatus({
               action: fallbackDecision?.action || 'voice_check',
@@ -1241,7 +1285,7 @@ export default function ElderScreen() {
         }, 6500);
       },
     });
-  }, [isListening, finishListening, stop, listen, selectedLang, handleFallModalSafe, speak, sendMessage, elderProfile, medications, selectedMood]);
+  }, [isListening, finishListening, stop, listen, selectedLang, handleFallModalSafe, triggerFallAlert, speak, sendMessage, elderProfile, medications, selectedMood]);
 
   /**
    * Universal Intelligent Payload Classifier & Router.
@@ -1317,23 +1361,8 @@ export default function ElderScreen() {
         ? null
         : `${type}_${action}_${(payload.message || payload.text || rawText).slice(0, 30)}_${payload.timestamp || ''}`;
 
-      const isCallCandidate =
-        allTextHaystack.includes('call') ||
-        allTextHaystack.includes('calling') ||
-        type.includes('call') ||
-        action.includes('call') ||
-        eventType.includes('call');
-
-      if (!isCallCandidate && dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
-      if (dedupKey) {
-        processedDecisionsRef.current.add(dedupKey);
-        setTimeout(() => {
-          processedDecisionsRef.current.delete(dedupKey);
-        }, 20000);
-      }
-
       // =========================================================================
-      // 0. CALL RESPONSES, TERMINATIONS & ECHOES (NEVER TRIGGER INCOMING CALL ALERT)
+      // 0. CRITICAL EMERGENCY & SAFE/ACK PRE-CHECKS
       // =========================================================================
       const isCallStatusOrTermination =
         type === 'callresponse' ||
@@ -1385,6 +1414,34 @@ export default function ElderScreen() {
         return;
       }
 
+      // Family Alert Acknowledgment / Reassurance (Caregiver clicked Acknowledge on dashboard)
+      const isAck =
+        ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
+        ['acknowledge', 'ack', 'caregiver_ack', 'acknowledge_alert'].includes(action) ||
+        allTextHaystack.includes('acknowledged') ||
+        allTextHaystack.includes('on my way') ||
+        allTextHaystack.includes('coming home') ||
+        allTextHaystack.includes('arjun dispatched') ||
+        allTextHaystack.includes('priya responded');
+
+      if (isAck) {
+        // STOP the Fall Emergency modal and alarm chime immediately!
+        stop();
+        setFallModalOpen(false);
+        setBackendAlertActive(false);
+        setSosSent(false);
+        if (escalationTimerRef.current) clearInterval(escalationTimerRef.current);
+        alertDismissedAtRef.current = Date.now();
+
+        const ackBy = payload.acknowledged_by || payload.changed_by_name || payload.sender || familyContactName;
+        const ackMsg = rawText || `${ackBy} acknowledged your alert and is on the way home!`;
+        setFamilyAck({ acknowledgedBy: ackBy, message: ackMsg, timestamp: Date.now() });
+        playSuccessChime();
+        speak(`${ackBy} has acknowledged your alert and is on the way to help you.`, selectedLang);
+        setTimeout(() => setFamilyAck(null), 14000);
+        return;
+      }
+
       // Profile sync handshake and family profile updates
       if (rawText.startsWith('PROFILE_SYNC:') || payload.family_message?.startsWith('PROFILE_SYNC:')) {
         return; // Silent: don't speak or alert own profile broadcasts
@@ -1410,6 +1467,67 @@ export default function ElderScreen() {
         return;
       }
 
+      // =========================================================================
+      // 1. CRITICAL LIFE-SAFETY EMERGENCY & PRIVILEGE ESCALATION (TOP PRIORITY)
+      // Displays the Full-Screen "DID YOU FALL? ARE YOU OKAY?" countdown modal.
+      // Critical mentions MUST NEVER trigger an incoming phone call!
+      // =========================================================================
+      const isEmergencyAction =
+        action === 'call_emergency' ||
+        action === 'emergency_escalate' ||
+        action === 'escalate_112';
+
+      const isEmergencySeverity = severity === 'critical';
+
+      const isEmergencyType =
+        type === 'fall' ||
+        type === 'manual_panic' ||
+        eventType === 'fall' ||
+        eventType === 'manual_panic' ||
+        payload.type === 'fall' ||
+        payload.type === 'manual_panic' ||
+        payload.type === 'FallEmergency';
+
+      const emergencyKeywordsList = [
+        'critical', 'emergency', 'unresponsive', 'did you fall', 'fell down',
+        'sudden posture drop', 'acute distress', '112 escalation', 'manual panic',
+        'chest pain', 'severe pain', 'ambulance', 'sos alert', 'emergency escalate',
+        'escalating to 112', 'connecting to 112', 'calling emergency', 'calling 112',
+        'calling ambulance', 'calling for help', 'biddiddene', 'novoo', 'sahaya',
+        'madad', 'gira', 'dard', 'chakkar'
+      ];
+
+      const hasEmergencyKeyword = emergencyKeywordsList.some(
+        (kw) => allTextHaystack.includes(kw) || lowerText.includes(kw)
+      );
+
+      const isCriticalEmergency = isEmergencyAction || isEmergencySeverity || isEmergencyType || hasEmergencyKeyword;
+
+      if (isCriticalEmergency) {
+        console.log('🚨 Critical Emergency Detected — Enabling Privilege Escalation Modal:', {
+          action,
+          severity,
+          type,
+          eventType,
+          rawText: rawText.slice(0, 60),
+        });
+
+        // Ensure NO phone call overlays or ringing are active
+        setActiveCall(null);
+        setIncomingCall(null);
+        setOutgoingCall(null);
+
+        const alertReason =
+          payload.voice_message_to_elder ||
+          payload.family_message ||
+          payload.reasoning_trace ||
+          rawText ||
+          (t.fallAlertPrompt || 'Kamala, did you fall? Are you fine? Please confirm if you are okay.');
+
+        triggerFallAlert(alertReason);
+        return;
+      }
+
       // Do NOT process self-initiated calls or already handled calls
       const currentElderName = (elderProfile?.name || 'Kamala Devi').toLowerCase();
       if (
@@ -1424,11 +1542,35 @@ export default function ElderScreen() {
         return;
       }
 
-      console.log('📬 Ingesting & Classifying Payload:', { type, action, eventType, severity, rawText });
+      // Deduplication guard for non-emergency messages
+      const isCallCandidate =
+        !isCriticalEmergency &&
+        action !== 'call_emergency' &&
+        action !== 'emergency_escalate' &&
+        severity !== 'critical' &&
+        (
+          allTextHaystack.includes('call_invite') ||
+          allTextHaystack.includes('priya is calling') ||
+          allTextHaystack.includes('family is calling') ||
+          type === 'callinvite' ||
+          payload.type === 'CallInvite' ||
+          eventType === 'video_call' ||
+          eventType === 'voice_call'
+        );
+
+      if (!isCallCandidate && dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
+      if (dedupKey) {
+        processedDecisionsRef.current.add(dedupKey);
+        setTimeout(() => {
+          processedDecisionsRef.current.delete(dedupKey);
+        }, 20000);
+      }
+
+      console.log('📬 Ingesting & Classifying Non-Emergency Payload:', { type, action, eventType, severity, rawText });
 
       // =========================================================================
-      // 1. INCOMING CALL FROM FAMILY DASHBOARD (Schema D CallInvite or call event)
-      // Immediately pops up the Incoming Call Screen!
+      // 2. INCOMING CALL FROM FAMILY DASHBOARD (Schema D CallInvite only)
+      // Strictly family-initiated voice/video calls.
       // =========================================================================
       const inviteMsg =
         (typeof payload.family_message === 'string' && payload.family_message.includes('CALL_INVITE'))
@@ -1439,39 +1581,43 @@ export default function ElderScreen() {
               ? payload.message
               : '';
 
-      const lowerFamilyMsg = String(payload.family_message || '').toLowerCase();
-      const lowerReasoning = String(payload.reasoning_trace || '').toLowerCase();
-      const lowerVoiceMsg = String(payload.voice_message_to_elder || '').toLowerCase();
-      const lowerTranscript = String(payload.voice_transcript || '').toLowerCase();
+      const isEmergencyPhrase =
+        allTextHaystack.includes('calling 112') ||
+        allTextHaystack.includes('calling emergency') ||
+        allTextHaystack.includes('calling ambulance') ||
+        allTextHaystack.includes('calling for help') ||
+        allTextHaystack.includes('emergency services');
 
-      // Deep inspection: Was a call initiated by family, even if summarized by backend AI?
       const isCallKeywordsPresent =
-        Boolean(inviteMsg) ||
-        allTextHaystack.includes('call_invite') ||
-        allTextHaystack.includes('is calling') ||
-        allTextHaystack.includes('calling you') ||
-        allTextHaystack.includes('calling kamala') ||
-        allTextHaystack.includes('initiated voice call') ||
-        allTextHaystack.includes('initiated video call') ||
-        allTextHaystack.includes('initiated a call') ||
-        allTextHaystack.includes('initiated call') ||
-        allTextHaystack.includes('family initiated call') ||
-        allTextHaystack.includes('family is calling') ||
-        allTextHaystack.includes('priya is calling') ||
-        allTextHaystack.includes('incoming call') ||
-        allTextHaystack.includes('family-initiated call') ||
-        allTextHaystack.includes('family called') ||
-        allTextHaystack.includes('incoming voice call') ||
-        allTextHaystack.includes('incoming video call');
+        !isEmergencyPhrase &&
+        (
+          Boolean(inviteMsg) ||
+          allTextHaystack.includes('call_invite') ||
+          allTextHaystack.includes('call invite') ||
+          allTextHaystack.includes('priya is calling') ||
+          allTextHaystack.includes('family is calling') ||
+          allTextHaystack.includes('incoming call') ||
+          allTextHaystack.includes('incoming voice call') ||
+          allTextHaystack.includes('incoming video call') ||
+          allTextHaystack.includes('initiated voice call') ||
+          allTextHaystack.includes('initiated video call') ||
+          allTextHaystack.includes('family initiated call')
+        );
 
       const isCallRequest =
-        Boolean(inviteMsg) ||
-        type === 'callinvite' ||
-        payload.type === 'CallInvite' ||
-        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_request', 'call_elder', 'start_call', 'webrtc_call', 'phone_call'].includes(type) ||
-        ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'call_request'].includes(action) ||
-        ['call', 'family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
-        isCallKeywordsPresent;
+        !isCriticalEmergency &&
+        action !== 'call_emergency' &&
+        action !== 'emergency_escalate' &&
+        severity !== 'critical' &&
+        (
+          Boolean(inviteMsg) ||
+          type === 'callinvite' ||
+          payload.type === 'CallInvite' ||
+          ['family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'webrtc_call'].includes(type) ||
+          ['family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call'].includes(action) ||
+          ['family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
+          isCallKeywordsPresent
+        );
 
       if (isCallRequest) {
         let callerName = payload.caller_name || payload.sender || 'Priya (Daughter)';
@@ -1528,7 +1674,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 2. HOSTED AI AGENT DECISION (Teammate 2 AgentDecision / LLM Agent Reply)
+      // 3. HOSTED AI AGENT DECISION (Teammate 2 AgentDecision / LLM Agent Reply)
       // Processes voice replies from the hosted brain and speaks to the elder!
       // =========================================================================
       const isAiAgentDecision =
@@ -1546,13 +1692,16 @@ export default function ElderScreen() {
         // Record receipt timestamp so safety fallback timer cancels immediately
         lastReceivedAiDecisionTimeRef.current = Date.now();
 
-        // 2a. Check if action requires critical life-safety escalation
-        if (action === 'emergency_escalate' || action === 'escalate_112' || severity === 'critical') {
-          triggerFallAlert();
+        // 3a. Check if action requires critical life-safety escalation
+        if (action === 'call_emergency' || action === 'emergency_escalate' || action === 'escalate_112' || severity === 'critical') {
+          setActiveCall(null);
+          setIncomingCall(null);
+          setOutgoingCall(null);
+          triggerFallAlert(payload.voice_message_to_elder || payload.reasoning_trace);
           return;
         }
 
-        // 2b. Extract AI voice reply strictly addressed to the elder
+        // 3b. Extract AI voice reply strictly addressed to the elder
         const aiVoiceReply = String(
           payload.voice_message_to_elder ||
           payload.ai_reply ||
@@ -1567,15 +1716,36 @@ export default function ElderScreen() {
           reasoning: payload.reasoning_trace,
         });
 
-        // Fail-safe check: If AI message announces an incoming call, trigger call screen immediately
+        // Fail-safe check: If AI message announces genuine family incoming call, trigger call screen
         const lowerReply = aiVoiceReply.toLowerCase();
+        const isEmergencyVoice =
+          lowerReply.includes('emergency') ||
+          lowerReply.includes('112') ||
+          lowerReply.includes('ambulance') ||
+          lowerReply.includes('hospital') ||
+          lowerReply.includes('unresponsive') ||
+          lowerReply.includes('fall') ||
+          lowerReply.includes('distress');
+
         const isCallInAiSpeech =
-          lowerReply.includes('calling') ||
-          lowerReply.includes('is calling') ||
-          lowerReply.includes('calling you') ||
-          lowerReply.includes('initiated a call') ||
-          lowerReply.includes('voice call') ||
-          lowerReply.includes('video call');
+          !isEmergencyVoice &&
+          action !== 'call_emergency' &&
+          action !== 'emergency_escalate' &&
+          severity !== 'critical' &&
+          (
+            lowerReply.includes('priya is calling') ||
+            lowerReply.includes('family is calling') ||
+            lowerReply.includes('call from priya') ||
+            (lowerReply.includes('is calling') && !lowerReply.includes('emergency') && !lowerReply.includes('112'))
+          );
+
+        if (isEmergencyVoice) {
+          setActiveCall(null);
+          setIncomingCall(null);
+          setOutgoingCall(null);
+          triggerFallAlert(aiVoiceReply);
+          return;
+        }
 
         if (isCallInAiSpeech) {
           console.log('📞 Fail-Safe: Incoming call announced by AI Companion voice reply:', aiVoiceReply);
@@ -1650,49 +1820,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 3. FAMILY DASHBOARD ALERT (Schema C broadcast for Caregiver Dashboard)
-      // If critical emergency, notify elder; otherwise silent for elder tablet
-      // =========================================================================
-      if (type === 'familyalert' || payload.type === 'FamilyAlert') {
-        if (severity === 'critical' || action === 'emergency_escalate') {
-          triggerFallAlert();
-        }
-        return;
-      }
-
-      // =========================================================================
-      // 4. FAMILY ALERT ACKNOWLEDGMENT / REASSURANCE (Family clicked Acknowledge)
-      // Immediately stops the Fall Emergency screen, halts alarm, and reassures elder!
-      // =========================================================================
-      const isAck =
-        ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
-        ['acknowledge', 'ack', 'caregiver_ack', 'acknowledge_alert'].includes(action) ||
-        allTextHaystack.includes('acknowledged') ||
-        allTextHaystack.includes('on my way') ||
-        allTextHaystack.includes('coming home') ||
-        allTextHaystack.includes('arjun dispatched') ||
-        allTextHaystack.includes('priya responded');
-
-      if (isAck) {
-        // STOP the Fall Emergency modal and alarm chime immediately!
-        stop();
-        setFallModalOpen(false);
-        setBackendAlertActive(false);
-        setSosSent(false);
-        if (escalationTimerRef.current) clearInterval(escalationTimerRef.current);
-        alertDismissedAtRef.current = Date.now();
-
-        const ackBy = payload.acknowledged_by || payload.changed_by_name || payload.sender || familyContactName;
-        const ackMsg = rawText || `${ackBy} acknowledged your alert and is on the way home!`;
-        setFamilyAck({ acknowledgedBy: ackBy, message: ackMsg, timestamp: Date.now() });
-        playSuccessChime();
-        speak(`${ackBy} has acknowledged your alert and is on the way to help you.`, selectedLang);
-        setTimeout(() => setFamilyAck(null), 14000);
-        return;
-      }
-
-      // =========================================================================
-      // 5. INCOMING FAMILY MESSAGE / NOTE FROM PRIYA (EXACT CAREGIVER TEXT)
+      // 4. INCOMING FAMILY MESSAGE / NOTE FROM PRIYA (EXACT CAREGIVER TEXT)
       // Displays in the Family Live Card when typed by caregiver on dashboard
       // =========================================================================
       const isFromElder =
@@ -1772,7 +1900,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 6. FAMILY DAILY CHECK-IN SYNC (Teammate 4 sendCheckIn: emotion_detected)
+      // 5. FAMILY DAILY CHECK-IN SYNC (Teammate 4 sendCheckIn: emotion_detected)
       // =========================================================================
       if (eventType === 'emotion_detected') {
         const emotion = payload.emotion || 'happy';
@@ -1784,7 +1912,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 7. FAMILY MEDICATION NUDGE / REMINDER (Teammate 4 sendMedicationMissed)
+      // 6. FAMILY MEDICATION NUDGE / REMINDER (Teammate 4 sendMedicationMissed)
       // =========================================================================
       const isMedNudge =
         ['medication_reminder', 'family_nudge', 'task', 'task.created', 'medication_nudge'].includes(type) ||
@@ -1803,22 +1931,9 @@ export default function ElderScreen() {
         return;
       }
 
-      // =========================================================================
-      // 8. TRUE CRITICAL EMERGENCY (Fall detected, 112 Escalation, Manual Panic)
-      // =========================================================================
-      const isCriticalEmergency =
-        (action === 'emergency_escalate' || action === 'escalate_112') ||
-        (eventType === 'fall') ||
-        (severity === 'critical' && (lowerText.includes('fall') || lowerText.includes('unresponsive')) && !lowerText.includes('sos button') && !lowerText.includes('phone call') && !lowerText.includes('calling priya'));
-
-      if (isCriticalEmergency) {
-        triggerFallAlert();
-        return;
-      }
-
       // End of classification pipeline
     },
-    [selectedLang, t, speak, speakThenListen, sendMessage]
+    [selectedLang, t, speak, speakThenListen, triggerFallAlert, sendMessage]
   );
 
   classifyAndDispatchRef.current = classifyAndDispatchMessage;
@@ -1865,21 +1980,41 @@ export default function ElderScreen() {
             evt.type,
           ].filter(Boolean).join(' ').toLowerCase();
 
+          const isCriticalEvent =
+            evt.severity === 'critical' ||
+            evt.action === 'call_emergency' ||
+            evt.action === 'emergency_escalate' ||
+            evt.action === 'escalate_112' ||
+            evt.event_type === 'fall' ||
+            evt.event_type === 'manual_panic' ||
+            evt.type === 'fall' ||
+            evt.type === 'manual_panic' ||
+            [
+              'critical', 'emergency', 'unresponsive', 'fell down', 'did you fall', 'chest pain', 'severe pain', '112'
+            ].some((kw) => allEvtText.includes(kw));
+
+          if (isCriticalEvent) {
+            setActiveCall(null);
+            setIncomingCall(null);
+            setOutgoingCall(null);
+            classifyAndDispatchMessage(evt);
+            break;
+          }
+
           const isCallEvent =
-            allEvtText.includes('initiated voice call') ||
-            allEvtText.includes('initiated video call') ||
-            allEvtText.includes('initiated a call') ||
-            allEvtText.includes('initiated call') ||
-            allEvtText.includes('family initiated call') ||
-            allEvtText.includes('is calling') ||
-            allEvtText.includes('calling you') ||
-            allEvtText.includes('calling kamala') ||
-            allEvtText.includes('call invite') ||
-            allEvtText.includes('call_invite') ||
-            evt.event_type === 'call' ||
-            evt.event_type === 'video_call' ||
-            evt.event_type === 'voice_call' ||
-            evt.type === 'CallInvite';
+            !isCriticalEvent &&
+            (
+              allEvtText.includes('initiated voice call') ||
+              allEvtText.includes('initiated video call') ||
+              allEvtText.includes('family initiated call') ||
+              allEvtText.includes('priya is calling') ||
+              allEvtText.includes('family is calling') ||
+              allEvtText.includes('call invite') ||
+              allEvtText.includes('call_invite') ||
+              evt.event_type === 'video_call' ||
+              evt.event_type === 'voice_call' ||
+              evt.type === 'CallInvite'
+            );
 
           if (isCallEvent) {
             const isVideo = allEvtText.includes('video') || evt.event_type === 'video_call';
