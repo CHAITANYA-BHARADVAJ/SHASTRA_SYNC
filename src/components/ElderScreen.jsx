@@ -1771,13 +1771,15 @@ export default function ElderScreen() {
   }, [classifyAndDispatchMessage]);
 
   // Check-In Scheduler
-  const { currentCheckIn, handleResponse: handleCheckInResponse, dismissCheckIn, triggerCheckInNow } =
-    useCheckInScheduler({ elderId: ELDER_ID, selectedLang });
-
-  const triggerCognitive = useCallback(() => triggerCheckInNow('cognitive'), [triggerCheckInNow]);
-  const triggerMeal = useCallback((meal) => triggerCheckInNow('meal', meal), [triggerCheckInNow]);
-  const triggerSleep = useCallback(() => triggerCheckInNow('sleep'), [triggerCheckInNow]);
-  const triggerMobility = useCallback(() => triggerCheckInNow('mobility'), [triggerCheckInNow]);
+  const {
+    activeCheckIn: currentCheckIn,
+    handleSelectOption: handleCheckInResponse,
+    dismissCheckIn,
+    triggerCognitive,
+    triggerMeal,
+    triggerSleep,
+    triggerMobility,
+  } = useCheckInScheduler({ elderId: ELDER_ID, selectedLang });
 
   // Vision Simulator
   const triggerSimulatedVisionEvent = useCallback(
