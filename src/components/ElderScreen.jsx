@@ -1662,17 +1662,30 @@ export default function ElderScreen() {
 
       // =========================================================================
       // 4. FAMILY ALERT ACKNOWLEDGMENT / REASSURANCE (Family clicked Acknowledge)
+      // Immediately stops the Fall Emergency screen, halts alarm, and reassures elder!
       // =========================================================================
       const isAck =
         ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
         ['acknowledge', 'ack', 'caregiver_ack', 'acknowledge_alert'].includes(action) ||
-        (lowerText.includes('acknowledged') || lowerText.includes('on my way') || lowerText.includes('coming home') || lowerText.includes('arjun dispatched') || lowerText.includes('priya responded'));
+        allTextHaystack.includes('acknowledged') ||
+        allTextHaystack.includes('on my way') ||
+        allTextHaystack.includes('coming home') ||
+        allTextHaystack.includes('arjun dispatched') ||
+        allTextHaystack.includes('priya responded');
 
       if (isAck) {
+        // STOP the Fall Emergency modal and alarm chime immediately!
+        stop();
+        setFallModalOpen(false);
+        setBackendAlertActive(false);
+        setSosSent(false);
+        if (escalationTimerRef.current) clearInterval(escalationTimerRef.current);
+        alertDismissedAtRef.current = Date.now();
+
         const ackBy = payload.acknowledged_by || payload.changed_by_name || payload.sender || familyContactName;
         const ackMsg = rawText || `${ackBy} acknowledged your alert and is on the way home!`;
         setFamilyAck({ acknowledgedBy: ackBy, message: ackMsg, timestamp: Date.now() });
-        playGentleChime();
+        playSuccessChime();
         speak(`${ackBy} has acknowledged your alert and is on the way to help you.`, selectedLang);
         setTimeout(() => setFamilyAck(null), 14000);
         return;
@@ -1893,12 +1906,15 @@ export default function ElderScreen() {
             break;
           }
 
-          // Route only family messages/notes to classifier (NEVER route pending sensor events which cause emergency echo loops!)
+          // Route family messages/notes AND acknowledgments to classifier (NEVER route pending sensor events which cause emergency echo loops!)
           if (
             evt.type === 'family_message' ||
             evt.family_message ||
+            evt.type === 'alert_acknowledged' ||
             allEvtText.includes('family_message') ||
             allEvtText.includes('family_note') ||
+            allEvtText.includes('acknowledged') ||
+            allEvtText.includes('on my way') ||
             (evt.sender && String(evt.sender).toLowerCase().includes('priya') && !allEvtText.includes('fall'))
           ) {
             classifyAndDispatchMessage(evt);
