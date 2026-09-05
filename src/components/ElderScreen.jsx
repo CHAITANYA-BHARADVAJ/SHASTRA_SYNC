@@ -535,7 +535,7 @@ export default function ElderScreen() {
    * Displays compassionate "Did you fall? Are you fine?" prompt and speaks to senior.
    * Clears any active call overlays so the critical emergency interface has 100% focus.
    */
-  const triggerFallAlert = useCallback((customReason, escalateDirectly = false) => {
+  const triggerFallAlert = useCallback((customReason) => {
     // 1. Active cooldown protection: elder just pressed "I AM OKAY"
     const timeSinceDismissal = Date.now() - alertDismissedAtRef.current;
     if (timeSinceDismissal < ALERT_COOLDOWN_MS) {
@@ -548,9 +548,8 @@ export default function ElderScreen() {
       return;
     }
 
-    if (escalateDirectly) {
-      setIsEmergencyEscalated(true);
-    }
+    // ALWAYS show the 15-second countdown timer first — never skip to escalated
+    setIsEmergencyEscalated(false);
     emergencyActiveRef.current = true;
 
     setActiveCall(null);
@@ -562,10 +561,8 @@ export default function ElderScreen() {
     setFallReason(customReason || empatheticPrompt);
     setFallModalOpen(true);
     playEmergencyAlarm();
-    if (!escalateDirectly) {
-      speak(empatheticPrompt, selectedLang);
-    }
-  }, [elderProfile, isEmergencyEscalated, selectedLang, speak]);
+    speak(empatheticPrompt, selectedLang);
+  }, [elderProfile, selectedLang, speak]);
 
   /**
    * Reset the active backend emergency/escalation mode.
@@ -1197,10 +1194,8 @@ export default function ElderScreen() {
           setActiveCall(null);
           setIncomingCall(null);
           setOutgoingCall(null);
-          triggerFallAlert(transcript, true);
-
-          // Dispatch the emergency request ONCE only
-          handleSOS(transcript);
+          // Show 15s countdown timer — handleSOS fires via onEmergencyEscalate when timer expires
+          triggerFallAlert(transcript);
           return;
         }
 
@@ -1642,8 +1637,8 @@ export default function ElderScreen() {
           rawText ||
           (t.fallAlertPrompt || 'Kamala, did you fall? Are you fine? Please confirm if you are okay.');
 
-        // For critical emergency mentions / distress, directly show PRIVILEGES ESCALATED screen
-        triggerFallAlert(alertReason, true);
+        // Show 15s countdown timer — escalation dispatches via onEmergencyEscalate when timer expires
+        triggerFallAlert(alertReason);
         return;
       }
 
