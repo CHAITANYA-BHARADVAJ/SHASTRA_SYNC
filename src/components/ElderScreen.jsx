@@ -472,9 +472,11 @@ export default function ElderScreen() {
   const lastTalkTimeRef = useRef(0);
   // Cooldown guard: suppress new alerts for N ms after user dismisses one
   const alertDismissedAtRef = useRef(0);
-  const ALERT_COOLDOWN_MS = 30000; // 30-second rock-solid cooldown after dismissal
+  const ALERT_COOLDOWN_MS = 60000; // 60-second rock-solid cooldown after dismissal
   const fallModalOpenRef = useRef(false);
   fallModalOpenRef.current = fallModalOpen;
+  const [isEmergencyEscalated, setIsEmergencyEscalated] = useState(false);
+  const emergencyActiveRef = useRef(false);
   // Strict once-only emergency latch: guarantee exactly ONE emergency request is sent per incident
   const hasSentEmergencyRef = useRef(false);
   // Post-emergency call lockout: completely blocks any calls for 10 minutes after a critical emergency alert
@@ -482,11 +484,12 @@ export default function ElderScreen() {
 
   // Failsafe: whenever an emergency alert is open, active, or in lockout, forcefully suppress all call states
   useEffect(() => {
-    if (fallModalOpen || sosSent || Date.now() < emergencyLockedUntilRef.current) {
+    if (fallModalOpen || sosSent || isEmergencyEscalated || emergencyActiveRef.current || Date.now() < emergencyLockedUntilRef.current) {
       if (incomingCall) setIncomingCall(null);
+      if (activeCall) setActiveCall(null);
       if (outgoingCall) setOutgoingCall(null);
     }
-  }, [fallModalOpen, sosSent, incomingCall, outgoingCall]);
+  }, [fallModalOpen, sosSent, isEmergencyEscalated, incomingCall, activeCall, outgoingCall]);
 
   // Pure derived localization for active alert message: 0ms latency on language switch
   const displayedAlertMessage = rawAlertMessage
@@ -543,7 +546,7 @@ export default function ElderScreen() {
    * Displays compassionate "Did you fall? Are you fine?" prompt and speaks to senior.
    * Clears any active call overlays so the critical emergency interface has 100% focus.
    */
-  const triggerFallAlert = useCallback((customReason) => {
+  const triggerFallAlert = useCallback((customReason, escalateDirectly = false) => {
     // 1. Active cooldown protection: elder just pressed "I AM OKAY"
     const timeSinceDismissal = Date.now() - alertDismissedAtRef.current;
     if (timeSinceDismissal < ALERT_COOLDOWN_MS) {
@@ -551,9 +554,14 @@ export default function ElderScreen() {
       return;
     }
     // 2. Do not re-trigger if modal is already active
-    if (fallModalOpenRef.current) {
+    if (fallModalOpenRef.current && (isEmergencyEscalated || !escalateDirectly)) {
       return;
     }
+
+    if (escalateDirectly) {
+      setIsEmergencyEscalated(true);
+    }
+    emergencyActiveRef.current = true;
 
     // STRICTLY SUPPRESS ALL SYSTEM CALLS: Critical Emergency takes absolute priority
     // Lock out any incoming calls for 10 minutes following critical emergency alert
@@ -567,16 +575,20 @@ export default function ElderScreen() {
     setFallReason(customReason || empatheticPrompt);
     setFallModalOpen(true);
     playEmergencyAlarm();
-    speak(empatheticPrompt, selectedLang);
-  }, [elderProfile, selectedLang, speak]);
+    if (!escalateDirectly) {
+      speak(empatheticPrompt, selectedLang);
+    }
+  }, [elderProfile, isEmergencyEscalated, selectedLang, speak]);
 
   /**
    * Reset the active backend emergency/escalation mode.
-   * Sets a 30s cooldown timestamp, resets emergency latch, and resolves the alert cleanly.
+   * Sets a 60s cooldown timestamp, resets emergency latch, and resolves the alert cleanly.
    */
   const handleFallModalSafe = useCallback(async () => {
     stop();
     hasSentEmergencyRef.current = false;
+    emergencyActiveRef.current = false;
+    setIsEmergencyEscalated(false);
     // Maintain call lockout for 10 minutes after critical alert dismissal: strictly NO calls after emergency
     emergencyLockedUntilRef.current = Date.now() + 600000;
     setFallModalOpen(false);
@@ -603,11 +615,12 @@ export default function ElderScreen() {
       type: 'alert_cancelled',
       elder_id: ELDER_ID,
       status: 'safe',
-      message: 'Kamala confirmed: I am safe, emergency cancelled.',
+      message: 'Kamala confirmed safe. Alert resolved.',
       timestamp: new Date().toISOString(),
     });
 
     // 3. Post resolved decision to Hub so family dashboard clears alert banner cleanly
+    // Use clean phrasing without 'emergency' to avoid false-positive regex loops
     try {
       await postDecision({
         type: 'AgentDecision',
@@ -615,10 +628,10 @@ export default function ElderScreen() {
         event_id: `evt_safe_${Date.now()}`,
         severity: 'low',
         action: 'monitor',
-        reasoning_trace: 'Elder Kamala Devi explicitly confirmed "I AM OKAY". Life-safety alert cancelled and resolved.',
+        reasoning_trace: 'Elder Kamala Devi confirmed safe and comfortable. Alert resolved.',
         voice_message_to_elder: 'I am glad you are safe and comfortable.',
         language_code: 'en-IN',
-        family_message: '✓ Kamala confirmed: I am safe and comfortable. Emergency alert cancelled.',
+        family_message: '✓ Kamala confirmed: safe and comfortable. Alert resolved.',
       });
     } catch (e) {
       console.warn('Failed to post safe confirmation to Hub:', e);
@@ -638,6 +651,9 @@ export default function ElderScreen() {
       return;
     }
     hasSentEmergencyRef.current = true;
+    emergencyActiveRef.current = true;
+    setIsEmergencyEscalated(true);
+    setFallModalOpen(true);
     lastSosTimeRef.current = Date.now();
     // Maintain call lockout for 10 minutes: strictly NO calls during/after emergency
     emergencyLockedUntilRef.current = Date.now() + 600000;
@@ -1201,7 +1217,7 @@ export default function ElderScreen() {
           setActiveCall(null);
           setIncomingCall(null);
           setOutgoingCall(null);
-          triggerFallAlert(transcript);
+          triggerFallAlert(transcript, true);
 
           // Dispatch the emergency request ONCE only
           handleSOS(transcript);
@@ -1398,9 +1414,15 @@ export default function ElderScreen() {
         payload.type === 'alert_cancelled' ||
         payload.status === 'safe' ||
         lowerText.includes('alert cancelled') ||
+        lowerText.includes('confirmed safe') ||
         lowerText.includes('confirmed: i am safe') ||
-        lowerText.includes('cancel emergency')
+        lowerText.includes('cancel emergency') ||
+        lowerText.includes('alert resolved')
       ) {
+        stop();
+        hasSentEmergencyRef.current = false;
+        emergencyActiveRef.current = false;
+        setIsEmergencyEscalated(false);
         setFallModalOpen(false);
         setBackendAlertActive(false);
         setSosSent(false);
@@ -1412,8 +1434,12 @@ export default function ElderScreen() {
       const isAck =
         ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
         ['acknowledge', 'ack', 'caregiver_ack', 'acknowledge_alert'].includes(action) ||
+        allTextHaystack.includes('alert_acknowledged') ||
         allTextHaystack.includes('acknowledged') ||
+        allTextHaystack.includes('priya acknowledged') ||
+        allTextHaystack.includes('elder is safe') ||
         allTextHaystack.includes('on my way') ||
+        allTextHaystack.includes('on the way') ||
         allTextHaystack.includes('coming home') ||
         allTextHaystack.includes('arjun dispatched') ||
         allTextHaystack.includes('priya responded');
@@ -1422,6 +1448,8 @@ export default function ElderScreen() {
         // STOP the Fall Emergency modal and alarm chime immediately!
         stop();
         hasSentEmergencyRef.current = false;
+        emergencyActiveRef.current = false;
+        setIsEmergencyEscalated(false);
         emergencyLockedUntilRef.current = Date.now() + 600000; // Block calls for 10 minutes following critical alert
         setFallModalOpen(false);
         setBackendAlertActive(false);
@@ -1501,7 +1529,19 @@ export default function ElderScreen() {
         (kw) => allTextHaystack.includes(kw) || lowerText.includes(kw)
       );
 
-      const isCriticalEmergency = isEmergencyAction || isEmergencySeverity || isEmergencyType || hasEmergencyKeyword;
+      // CRITICAL: Safe confirmation, monitor action, or acknowledgment must NEVER be treated as emergency!
+      const isSafeOrAckMessage =
+        action === 'monitor' ||
+        action === 'acknowledge' ||
+        severity === 'low' ||
+        allTextHaystack.includes('safe') ||
+        allTextHaystack.includes('cancelled') ||
+        allTextHaystack.includes('resolved') ||
+        allTextHaystack.includes('acknowledged');
+
+      const isCriticalEmergency =
+        !isSafeOrAckMessage &&
+        (isEmergencyAction || isEmergencySeverity || isEmergencyType || hasEmergencyKeyword);
 
       if (isCriticalEmergency) {
         console.log('🚨 Critical Emergency Detected — Enabling Privilege Escalation Modal:', {
@@ -1524,7 +1564,8 @@ export default function ElderScreen() {
           rawText ||
           (t.fallAlertPrompt || 'Kamala, did you fall? Are you fine? Please confirm if you are okay.');
 
-        triggerFallAlert(alertReason);
+        // For critical emergency mentions / distress, directly show PRIVILEGES ESCALATED screen
+        triggerFallAlert(alertReason, true);
         return;
       }
 
@@ -1580,7 +1621,7 @@ export default function ElderScreen() {
       const callTimestamp = payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now();
       const isCallFresh = Date.now() - callTimestamp < 15000; // Must be fresh within 15 seconds
 
-      if (isEmergencyLocked) {
+      if (isCallCandidate && (isEmergencyLocked || emergencyActiveRef.current || fallModalOpen || sosSent || isEmergencyEscalated)) {
         if (payload.call_id) handledCallsRef.current.add(payload.call_id);
         setActiveCall(null);
         setIncomingCall(null);
@@ -1589,11 +1630,14 @@ export default function ElderScreen() {
       }
 
       const isCallRequest =
+        isCallCandidate &&
         !isEmergencyLocked &&
         isCallFresh &&
         !hasSentEmergencyRef.current &&
+        !emergencyActiveRef.current &&
         !fallModalOpen &&
         !sosSent &&
+        !isEmergencyEscalated &&
         !isCriticalEmergency &&
         action !== 'call_emergency' &&
         action !== 'emergency_escalate' &&
@@ -1895,26 +1939,22 @@ export default function ElderScreen() {
     }
   }, [lastMessage, classifyAndDispatchMessage]);
 
-  // Live Event Polling: catches calls/events posted to /api/events by Family Dashboard (Teammate 4)
-  // Throttled to 6s and strictly paused during active emergency to eliminate duplicate request flooding
+  // Live Event Polling:
+  // 1. During active emergency: Fast 2-second check ONLY for family acknowledgment / safe resolution
+  // 2. Normal mode: 6-second check for family call invites and notes
   const pollHandledEventsRef = useRef(new Set());
   useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      // Pause polling during active emergency to avoid request flooding and echo loops
-      const isEmergencyLocked = Date.now() < emergencyLockedUntilRef.current;
-      if (fallModalOpen || sosSent || hasSentEmergencyRef.current || isEmergencyLocked) {
-        return;
-      }
+    const isEmergencyActive = fallModalOpen || sosSent || isEmergencyEscalated || hasSentEmergencyRef.current;
+    const intervalMs = isEmergencyActive ? 2000 : 6000;
 
+    const pollInterval = setInterval(async () => {
       try {
-        const events = await fetchLatestEvents(5);
+        const events = await fetchLatestEvents(isEmergencyActive ? 10 : 5);
         if (!Array.isArray(events) || events.length === 0) return;
 
         for (const evt of events) {
           const evtId = evt.event_id || `${evt.event_type}_${evt.timestamp || ''}`;
           if (pollHandledEventsRef.current.has(evtId)) continue;
-          pollHandledEventsRef.current.add(evtId);
-          setTimeout(() => pollHandledEventsRef.current.delete(evtId), 60000);
 
           const allEvtText = [
             evt.voice_transcript,
@@ -1925,7 +1965,35 @@ export default function ElderScreen() {
             evt.type,
           ].filter(Boolean).join(' ').toLowerCase();
 
-          // Emergency events are already handled via WebSocket / direct triggers; skip in polling to prevent loops
+          // Check if this is an acknowledgment or safe confirmation from Family Dashboard
+          const isAckEvt =
+            evt.type === 'alert_acknowledged' ||
+            evt.event_type === 'alert_acknowledged' ||
+            evt.action === 'acknowledge' ||
+            allEvtText.includes('alert_acknowledged') ||
+            allEvtText.includes('acknowledged') ||
+            allEvtText.includes('priya acknowledged') ||
+            allEvtText.includes('elder is safe') ||
+            allEvtText.includes('on my way') ||
+            allEvtText.includes('on the way');
+
+          if (isAckEvt) {
+            pollHandledEventsRef.current.add(evtId);
+            setTimeout(() => pollHandledEventsRef.current.delete(evtId), 60000);
+            console.log('✅ Family acknowledgment detected via polling! Closing emergency modal.');
+            classifyAndDispatchMessage(evt);
+            return;
+          }
+
+          // If in active emergency, DO NOT PROCESS ANY OTHER EVENT TYPE (strictly no calls, no echo loops)
+          if (isEmergencyActive) {
+            continue;
+          }
+
+          pollHandledEventsRef.current.add(evtId);
+          setTimeout(() => pollHandledEventsRef.current.delete(evtId), 60000);
+
+          // Emergency events are already handled via WebSocket / direct triggers; skip in polling
           const isCriticalEvent =
             evt.severity === 'critical' ||
             evt.action === 'call_emergency' ||
@@ -2002,15 +2070,12 @@ export default function ElderScreen() {
             break;
           }
 
-          // Route family messages/notes AND acknowledgments to classifier (NEVER route pending sensor events which cause emergency echo loops!)
+          // Route family messages/notes
           if (
             evt.type === 'family_message' ||
             evt.family_message ||
-            evt.type === 'alert_acknowledged' ||
             allEvtText.includes('family_message') ||
             allEvtText.includes('family_note') ||
-            allEvtText.includes('acknowledged') ||
-            allEvtText.includes('on my way') ||
             (evt.sender && String(evt.sender).toLowerCase().includes('priya') && !allEvtText.includes('fall'))
           ) {
             classifyAndDispatchMessage(evt);
@@ -2019,10 +2084,10 @@ export default function ElderScreen() {
       } catch (err) {
         // Silent network retry
       }
-    }, 6000);
+    }, intervalMs);
 
     return () => clearInterval(pollInterval);
-  }, [classifyAndDispatchMessage, fallModalOpen, sosSent]);
+  }, [classifyAndDispatchMessage, fallModalOpen, sosSent, isEmergencyEscalated]);
 
   // Simulation Handlers for Team Demonstration & Testing
   const simulateIncomingFamilyMessage = useCallback((sender = 'Priya (Daughter)', text = 'Had lunch Amma? Taking my break now, visiting this evening! ❤️') => {
@@ -2826,7 +2891,7 @@ export default function ElderScreen() {
       </button>
 
       {/* Incoming Family Call Modal Overlay */}
-      {incomingCall && (
+      {incomingCall && !fallModalOpen && !sosSent && !isEmergencyEscalated && !emergencyActiveRef.current && (
         <div className="incoming-call-overlay" role="dialog" aria-modal="true">
           <div className="incoming-call-card">
             <div className="call-pulse-cluster">
@@ -2854,7 +2919,7 @@ export default function ElderScreen() {
       )}
 
       {/* Active In-Progress Live Call Overlay */}
-      {activeCall && (
+      {activeCall && !fallModalOpen && !sosSent && !isEmergencyEscalated && !emergencyActiveRef.current && (
         <div className="incoming-call-overlay" role="dialog" aria-modal="true">
           <div className="incoming-call-card active-call-card" style={{ borderColor: '#10B981', boxShadow: '0 24px 60px rgba(16, 185, 129, 0.25)' }}>
             <div className="call-pulse-cluster">
@@ -2884,7 +2949,7 @@ export default function ElderScreen() {
       )}
 
       {/* Outgoing Call to Priya Overlay */}
-      {outgoingCall && (
+      {outgoingCall && !fallModalOpen && !sosSent && !isEmergencyEscalated && !emergencyActiveRef.current && (
         <div className="incoming-call-overlay" role="dialog" aria-modal="true">
           <div className="incoming-call-card outgoing-call-card">
             <div className="call-pulse-cluster">
@@ -2911,7 +2976,7 @@ export default function ElderScreen() {
         </div>
       )}
 
-      {/* Fall Emergency 30s Countdown Modal Overlay */}
+      {/* Fall Emergency Modal Overlay */}
       {fallModalOpen && (
         <FallEmergencyModal
           isOpen={fallModalOpen}
@@ -2920,6 +2985,7 @@ export default function ElderScreen() {
           onEmergencyEscalate={handleSOS}
           selectedLang={selectedLang}
           elderName={elderFirstName}
+          initialEscalated={isEmergencyEscalated}
         />
       )}
 

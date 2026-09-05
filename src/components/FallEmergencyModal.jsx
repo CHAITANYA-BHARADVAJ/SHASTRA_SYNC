@@ -47,22 +47,40 @@ export function FallEmergencyModal({
   onEmergencyEscalate,
   selectedLang = 'en-IN',
   elderName = 'Kamala',
+  initialEscalated = false,
 }) {
   const [secondsRemaining, setSecondsRemaining] = useState(30);
-  const [isEscalated, setIsEscalated] = useState(false);
+  const [isEscalated, setIsEscalated] = useState(Boolean(initialEscalated));
   const timerRef = useRef(null);
-  const hasEscalatedRef = useRef(false);
+  const hasEscalatedRef = useRef(Boolean(initialEscalated));
 
   const t = MODAL_I18N[selectedLang] || MODAL_I18N['en-IN'];
   const defaultFallPrompt = `${elderName}, did you fall? Are you fine? Please let us know if you need help.`;
   const localizedReason = fallReason ? localizeMessage(fallReason, selectedLang) : defaultFallPrompt;
 
+  // Sync initialEscalated prop changes
+  useEffect(() => {
+    if (initialEscalated) {
+      setIsEscalated(true);
+      hasEscalatedRef.current = true;
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  }, [initialEscalated]);
+
   useEffect(() => {
     if (isOpen) {
+      playEmergencyAlarm();
+
+      if (initialEscalated) {
+        setIsEscalated(true);
+        hasEscalatedRef.current = true;
+        if (timerRef.current) clearInterval(timerRef.current);
+        return;
+      }
+
       setSecondsRemaining(30);
       setIsEscalated(false);
       hasEscalatedRef.current = false;
-      playEmergencyAlarm();
 
       timerRef.current = setInterval(() => {
         setSecondsRemaining((prev) => {
@@ -90,7 +108,7 @@ export function FallEmergencyModal({
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isOpen, onEmergencyEscalate]);
+  }, [isOpen, initialEscalated, onEmergencyEscalate]);
 
   if (!isOpen) return null;
 
