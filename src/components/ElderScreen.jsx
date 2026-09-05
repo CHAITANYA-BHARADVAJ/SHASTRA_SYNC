@@ -477,6 +477,16 @@ export default function ElderScreen() {
   fallModalOpenRef.current = fallModalOpen;
   // Strict once-only emergency latch: guarantee exactly ONE emergency request is sent per incident
   const hasSentEmergencyRef = useRef(false);
+  // Post-emergency call lockout: completely blocks any calls for 10 minutes after a critical emergency alert
+  const emergencyLockedUntilRef = useRef(0);
+
+  // Failsafe: whenever an emergency alert is open, active, or in lockout, forcefully suppress all call states
+  useEffect(() => {
+    if (fallModalOpen || sosSent || Date.now() < emergencyLockedUntilRef.current) {
+      if (incomingCall) setIncomingCall(null);
+      if (outgoingCall) setOutgoingCall(null);
+    }
+  }, [fallModalOpen, sosSent, incomingCall, outgoingCall]);
 
   // Pure derived localization for active alert message: 0ms latency on language switch
   const displayedAlertMessage = rawAlertMessage
@@ -546,6 +556,8 @@ export default function ElderScreen() {
     }
 
     // STRICTLY SUPPRESS ALL SYSTEM CALLS: Critical Emergency takes absolute priority
+    // Lock out any incoming calls for 10 minutes following critical emergency alert
+    emergencyLockedUntilRef.current = Date.now() + 600000;
     setActiveCall(null);
     setIncomingCall(null);
     setOutgoingCall(null);
@@ -565,11 +577,16 @@ export default function ElderScreen() {
   const handleFallModalSafe = useCallback(async () => {
     stop();
     hasSentEmergencyRef.current = false;
+    // Maintain call lockout for 10 minutes after critical alert dismissal: strictly NO calls after emergency
+    emergencyLockedUntilRef.current = Date.now() + 600000;
     setFallModalOpen(false);
     setBackendAlertActive(false);
     setSosSent(false);
     setRawAlertMessage(null);
     setIncomingAlertMessage(null);
+    setActiveCall(null);
+    setIncomingCall(null);
+    setOutgoingCall(null);
 
     if (escalationTimerRef.current) clearInterval(escalationTimerRef.current);
     setEscalationTierKey('tier1');
@@ -622,6 +639,8 @@ export default function ElderScreen() {
     }
     hasSentEmergencyRef.current = true;
     lastSosTimeRef.current = Date.now();
+    // Maintain call lockout for 10 minutes: strictly NO calls during/after emergency
+    emergencyLockedUntilRef.current = Date.now() + 600000;
 
     setSosSent(true);
     playEmergencyAlarm();
@@ -1403,9 +1422,13 @@ export default function ElderScreen() {
         // STOP the Fall Emergency modal and alarm chime immediately!
         stop();
         hasSentEmergencyRef.current = false;
+        emergencyLockedUntilRef.current = Date.now() + 600000; // Block calls for 10 minutes following critical alert
         setFallModalOpen(false);
         setBackendAlertActive(false);
         setSosSent(false);
+        setActiveCall(null);
+        setIncomingCall(null);
+        setOutgoingCall(null);
         if (escalationTimerRef.current) clearInterval(escalationTimerRef.current);
         alertDismissedAtRef.current = Date.now();
 
@@ -1552,8 +1575,22 @@ export default function ElderScreen() {
               ? payload.message
               : '';
 
-      // Calls from system or during active emergency are strictly forbidden
+      // STRICT LOCKOUT: Calls from system, during active emergency, or after critical emergency are strictly forbidden
+      const isEmergencyLocked = Date.now() < emergencyLockedUntilRef.current;
+      const callTimestamp = payload.timestamp ? new Date(payload.timestamp).getTime() : Date.now();
+      const isCallFresh = Date.now() - callTimestamp < 15000; // Must be fresh within 15 seconds
+
+      if (isEmergencyLocked) {
+        if (payload.call_id) handledCallsRef.current.add(payload.call_id);
+        setActiveCall(null);
+        setIncomingCall(null);
+        setOutgoingCall(null);
+        return;
+      }
+
       const isCallRequest =
+        !isEmergencyLocked &&
+        isCallFresh &&
         !hasSentEmergencyRef.current &&
         !fallModalOpen &&
         !sosSent &&
@@ -1563,8 +1600,8 @@ export default function ElderScreen() {
         severity !== 'critical' &&
         (
           (Boolean(inviteMsg) && !inviteMsg.toLowerCase().includes('system') && !inviteMsg.toLowerCase().includes(currentElderName)) ||
-          (type === 'callinvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes(currentElderName)) ||
-          (payload.type === 'CallInvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes(currentElderName))
+          (type === 'callinvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes('system') && !payload.caller_name.toLowerCase().includes(currentElderName)) ||
+          (payload.type === 'CallInvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes('system') && !payload.caller_name.toLowerCase().includes(currentElderName))
         );
 
       if (isCallRequest) {
@@ -1864,7 +1901,8 @@ export default function ElderScreen() {
   useEffect(() => {
     const pollInterval = setInterval(async () => {
       // Pause polling during active emergency to avoid request flooding and echo loops
-      if (fallModalOpen || sosSent || hasSentEmergencyRef.current) {
+      const isEmergencyLocked = Date.now() < emergencyLockedUntilRef.current;
+      if (fallModalOpen || sosSent || hasSentEmergencyRef.current || isEmergencyLocked) {
         return;
       }
 
@@ -1902,7 +1940,17 @@ export default function ElderScreen() {
             continue;
           }
 
+          // Strict lockout check: NO calls allowed if an emergency occurred recently
+          if (Date.now() < emergencyLockedUntilRef.current) {
+            if (evt.call_id) handledCallsRef.current.add(evt.call_id);
+            continue;
+          }
+
+          const evtTimestamp = evt.timestamp ? new Date(evt.timestamp).getTime() : 0;
+          const isEvtFresh = Date.now() - evtTimestamp < 15000; // Must be fresh within 15 seconds
+
           const isCallEvent =
+            isEvtFresh &&
             (
               evt.type === 'CallInvite' ||
               evt.type === 'callinvite' ||
@@ -1916,7 +1964,8 @@ export default function ElderScreen() {
             if (
               rawCallMsg.toLowerCase().includes('kamala') ||
               rawCallMsg.toLowerCase().includes('system') ||
-              (evt.caller_name && evt.caller_name.toLowerCase().includes('kamala'))
+              (evt.caller_name && evt.caller_name.toLowerCase().includes('kamala')) ||
+              (evt.caller_name && evt.caller_name.toLowerCase().includes('system'))
             ) {
               continue;
             }
