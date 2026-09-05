@@ -1495,20 +1495,29 @@ export default function ElderScreen() {
       }
 
       // Family Alert Acknowledgment / Reassurance (Caregiver clicked Acknowledge on dashboard)
+      // STRICT: Only match explicit acknowledgment event types from Teammate 4's dashboard.
+      // NEVER match on broad keyword heuristics — the Hub AI's own responses contain words
+      // like "acknowledged", "safe", "on the way" which would cause false auto-acknowledgment.
       const isAck =
-        ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
+        ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed'].includes(type) ||
         ['acknowledge', 'ack', 'caregiver_ack', 'acknowledge_alert'].includes(action) ||
-        allTextHaystack.includes('alert_acknowledged') ||
-        allTextHaystack.includes('acknowledged') ||
-        allTextHaystack.includes('priya acknowledged') ||
-        allTextHaystack.includes('elder is safe') ||
-        allTextHaystack.includes('on my way') ||
-        allTextHaystack.includes('on the way') ||
-        allTextHaystack.includes('coming home') ||
-        allTextHaystack.includes('arjun dispatched') ||
-        allTextHaystack.includes('priya responded');
+        payload.type === 'family_acknowledgement' ||
+        payload.type === 'alert_acknowledged' ||
+        payload.type === 'FamilyAlertAck';
 
       if (isAck) {
+        // Dedup guard: don't process same ack event twice
+        const ackKey = `ack_${payload.decision_id || payload.alert_id || payload.timestamp || Date.now()}`;
+        if (processedDecisionsRef.current.has(ackKey)) return;
+        processedDecisionsRef.current.add(ackKey);
+        setTimeout(() => processedDecisionsRef.current.delete(ackKey), 30000);
+
+        // Only act if an emergency is actually active — ignore stale ack events
+        if (!fallModalOpenRef.current && !emergencyActiveRef.current && !sosSent) {
+          console.log('🛡️ Ack received but no emergency is active — ignoring stale ack');
+          return;
+        }
+
         // STOP the Fall Emergency modal and alarm chime immediately!
         stop();
         hasSentEmergencyRef.current = false;
