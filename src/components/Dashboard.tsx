@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useWebSocket, ConnectionStatus } from "@/hooks/useWebSocket";
 import { useSettings } from "@/context/SettingsContext";
 import { useToast } from "@/components/Toast";
+import { useFamilyMember } from "@/hooks/useFamilyMember";
 import { ElderProfile as ElderProfileType } from "@/types/alerts";
 import { Header } from "./Header";
 import { StatusBanner } from "./StatusBanner";
@@ -44,6 +45,7 @@ const elderProfile: ElderProfileType = {
 export function Dashboard() {
   const { settings, isLoaded } = useSettings();
   const { showToast } = useToast();
+  const { familyMember } = useFamilyMember();
   const { 
     alerts, 
     activities,
@@ -113,8 +115,14 @@ export function Dashboard() {
     return "safe";
   };
 
+  // Derive the emergency contact from the (editable) family member so that
+  // editing the profile name propagates here too. Relation's first word gives
+  // a clean label, e.g. "Shreesh (Daughter)".
+  const relationShort = familyMember.relation.split(" ")[0] || "Family";
   const currentElderProfile = {
     ...elderProfile,
+    emergencyContact: familyMember.name ? `${familyMember.name} (${relationShort})` : elderProfile.emergencyContact,
+    emergencyPhone: familyMember.phone || elderProfile.emergencyPhone,
     status: getOverallStatus() === "disconnected" ? "safe" : getOverallStatus() as "safe" | "attention" | "alert" | "critical",
     lastCheckIn: activities[0]?.timestamp || elderProfile.lastCheckIn,
   };
@@ -159,6 +167,153 @@ export function Dashboard() {
   const handleQuickActionToast = (type: "success" | "error", title: string, message?: string) => {
     showToast({ type, title, message });
   };
+
+  // ---- Reusable section elements (used by both mobile & desktop layouts) ----
+  const elderProfileEl = (
+    <ElderProfile
+      profile={currentElderProfile}
+      onCall={async () => {
+        const result = await sendEvent({
+          elder_id: elderProfile.id,
+          event_type: "normal",
+          voice_transcript: `Family initiated voice call to ${elderProfile.name}`,
+        });
+        if (result.success) {
+          showToast({ type: "info", title: "Calling", message: `Calling ${elderProfile.name.split(" ")[0]} at ${elderProfile.phone}...` });
+        } else {
+          showToast({ type: "error", title: "Call Failed", message: result.error || "Could not reach backend" });
+        }
+      }}
+      onVideo={async () => {
+        const result = await sendEvent({
+          elder_id: elderProfile.id,
+          event_type: "normal",
+          voice_transcript: `Family initiated video call to ${elderProfile.name}`,
+        });
+        if (result.success) {
+          showToast({ type: "info", title: "Video Call", message: `Starting video call with ${elderProfile.name.split(" ")[0]}...` });
+        } else {
+          showToast({ type: "error", title: "Video Call Failed", message: result.error || "Could not reach backend" });
+        }
+      }}
+      onMessage={() => setShowProfileMessage(true)}
+      onLocationClick={() => setShowProfileLocation(true)}
+      onEmergencyContactClick={() => {
+        showToast({ type: "info", title: "Emergency Contact", message: `${currentElderProfile.emergencyContact} • ${currentElderProfile.emergencyPhone}` });
+      }}
+      onMoreClick={() => setShowProfile(true)}
+    />
+  );
+
+  const quickActionsEl = (
+    <QuickActions
+      elderName={elderProfile.name}
+      elderPhone={elderProfile.phone}
+      emergencyPhone={elderProfile.emergencyPhone}
+      elderId={elderProfile.id}
+      elderAddress={elderProfile.address}
+      onToast={handleQuickActionToast}
+      registerSentMessage={registerSentMessage}
+    />
+  );
+
+  const timelineEl = <ActivityTimeline activities={activities} maxItems={5} />;
+
+  const dailyCheckInEl = (
+    <DailyCheckIn
+      elderId={elderProfile.id}
+      elderName={elderProfile.name}
+      onToast={handleQuickActionToast}
+    />
+  );
+
+  const alertsCardEl = (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: 0.2 }}
+      className="card overflow-hidden"
+    >
+      {/* Alerts Header */}
+      <div className="p-4 border-b border-[var(--border-primary)]">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ef4444] to-[#dc2626] flex items-center justify-center">
+              <Bell className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
+                Alerts
+                {stats.unacknowledged > 0 && (
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-[#ef4444] text-white rounded-full">
+                    {stats.unacknowledged}
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-[var(--text-muted)]">Real-time monitoring</p>
+            </div>
+          </div>
+
+          {alerts.length > 0 && (
+            <div className="flex items-center gap-1">
+              {stats.unacknowledged > 0 && (
+                <motion.button
+                  whileHover={{ scale: 1.05 }}
+                  whileTap={{ scale: 0.95 }}
+                  onClick={handleAcknowledgeAll}
+                  className="p-2 text-[#c8ff00] hover:bg-[#c8ff00]/10 rounded-lg transition-colors"
+                  title="Acknowledge all"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                </motion.button>
+              )}
+              <motion.button
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleClearAll}
+                className="p-2 text-[#ef4444] hover:bg-[#ef4444]/10 rounded-lg transition-colors"
+                title="Clear all"
+              >
+                <Trash2 className="w-4 h-4" />
+              </motion.button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Alerts List */}
+      <div className="p-4 max-h-[600px] lg:max-h-[720px] overflow-y-auto scrollbar-thin">
+        {filteredAlerts.length === 0 ? (
+          <div className="text-center py-8">
+            <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-[#22c55e]/10 flex items-center justify-center">
+              <CheckCircle2 className="w-6 h-6 text-[#22c55e]" />
+            </div>
+            <p className="text-sm font-medium text-[var(--text-primary)]">All Clear!</p>
+            <p className="text-xs text-[var(--text-muted)]">No alerts at the moment</p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            <AnimatePresence mode="popLayout">
+              {filteredAlerts.slice(0, 8).map((alert, index) => (
+                <AlertCard
+                  key={alert.id}
+                  alert={alert}
+                  onAcknowledge={handleAcknowledge}
+                  onDismiss={clearAlert}
+                  index={index}
+                />
+              ))}
+            </AnimatePresence>
+            {filteredAlerts.length > 8 && (
+              <p className="text-xs text-center text-[var(--text-muted)] pt-2">
+                +{filteredAlerts.length - 8} more alerts
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </motion.div>
+  );
 
   // Show loading state until settings are loaded
   if (!isLoaded) {
@@ -208,13 +363,6 @@ export function Dashboard() {
         unreadCount={stats.unacknowledged}
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        onNotificationsClick={() => {
-          if (stats.unacknowledged > 0) {
-            showToast({ type: "info", title: "Notifications", message: `You have ${stats.unacknowledged} unread alert${stats.unacknowledged > 1 ? "s" : ""}` });
-          } else {
-            showToast({ type: "success", title: "All Caught Up", message: "No new notifications" });
-          }
-        }}
         onProfileClick={() => setShowProfile(true)}
         onNotificationPrefsClick={() => setShowSettings(true)}
         onSignOut={() => {
@@ -242,152 +390,31 @@ export function Dashboard() {
               exit={{ opacity: 0, y: -20 }}
               transition={{ duration: 0.3 }}
             >
-              {/* Main Grid - 3-Column Layout with Alerts */}
-              {/* On mobile, Alerts show first (order-1) since they are the core purpose */}
-              <div className="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-                {/* Left Column - Profile & Quick Actions (order-3 on mobile) */}
-                <div className="space-y-6 order-3 lg:order-1">
-                  <ElderProfile
-                    profile={currentElderProfile}
-                    onCall={async () => {
-                      const result = await sendEvent({
-                        elder_id: elderProfile.id,
-                        event_type: "normal",
-                        voice_transcript: `Family initiated voice call to ${elderProfile.name}`,
-                      });
-                      if (result.success) {
-                        showToast({ type: "info", title: "Calling", message: `Calling ${elderProfile.name.split(" ")[0]} at ${elderProfile.phone}...` });
-                      } else {
-                        showToast({ type: "error", title: "Call Failed", message: result.error || "Could not reach backend" });
-                      }
-                    }}
-                    onVideo={async () => {
-                      const result = await sendEvent({
-                        elder_id: elderProfile.id,
-                        event_type: "normal",
-                        voice_transcript: `Family initiated video call to ${elderProfile.name}`,
-                      });
-                      if (result.success) {
-                        showToast({ type: "info", title: "Video Call", message: `Starting video call with ${elderProfile.name.split(" ")[0]}...` });
-                      } else {
-                        showToast({ type: "error", title: "Video Call Failed", message: result.error || "Could not reach backend" });
-                      }
-                    }}
-                    onMessage={() => setShowProfileMessage(true)}
-                    onLocationClick={() => setShowProfileLocation(true)}
-                    onEmergencyContactClick={() => {
-                      showToast({ type: "info", title: "Emergency Contact", message: `${elderProfile.emergencyContact} • ${elderProfile.emergencyPhone}` });
-                    }}
-                    onMoreClick={() => setShowProfile(true)}
-                  />
-                  <QuickActions 
-                    elderName={elderProfile.name}
-                    elderPhone={elderProfile.phone}
-                    emergencyPhone={elderProfile.emergencyPhone}
-                    elderId={elderProfile.id}
-                    elderAddress={elderProfile.address}
-                    onToast={handleQuickActionToast}
-                    registerSentMessage={registerSentMessage}
-                  />
+              {/* MOBILE layout — single column, exact order:
+                  Alerts, Quick Actions, Activity Timeline, Elder Profile, Daily Check-in */}
+              <div className="mt-6 flex flex-col gap-6 lg:hidden">
+                {alertsCardEl}
+                {quickActionsEl}
+                {timelineEl}
+                {elderProfileEl}
+                {dailyCheckInEl}
+              </div>
+
+              {/* DESKTOP layout — two independent columns (no row-height coupling,
+                  so no empty gaps): left = Profile + Quick Actions;
+                  right = Alerts, then Timeline + Daily Check-in side by side. */}
+              <div className="mt-6 hidden lg:grid lg:grid-cols-3 gap-6 items-start">
+                {/* Left column */}
+                <div className="space-y-6">
+                  {elderProfileEl}
+                  {quickActionsEl}
                 </div>
-
-                {/* Alerts - now spans 2 columns for a bigger view (order-1 on mobile so alerts show FIRST) */}
-                <div className="space-y-6 order-1 lg:order-2 lg:col-span-2">
-                  {/* Alerts Card */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.2 }}
-                    className="card overflow-hidden"
-                  >
-                    {/* Alerts Header */}
-                    <div className="p-4 border-b border-[var(--border-primary)]">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#ef4444] to-[#dc2626] flex items-center justify-center">
-                            <Bell className="w-5 h-5 text-white" />
-                          </div>
-                          <div>
-                            <h3 className="text-sm font-bold text-[var(--text-primary)] flex items-center gap-2">
-                              Alerts
-                              {stats.unacknowledged > 0 && (
-                                <span className="px-2 py-0.5 text-[10px] font-bold bg-[#ef4444] text-white rounded-full">
-                                  {stats.unacknowledged}
-                                </span>
-                              )}
-                            </h3>
-                            <p className="text-xs text-[var(--text-muted)]">Real-time monitoring</p>
-                          </div>
-                        </div>
-                        
-                        {alerts.length > 0 && (
-                          <div className="flex items-center gap-1">
-                            {stats.unacknowledged > 0 && (
-                              <motion.button
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                onClick={handleAcknowledgeAll}
-                                className="p-2 text-[#c8ff00] hover:bg-[#c8ff00]/10 rounded-lg transition-colors"
-                                title="Acknowledge all"
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                              </motion.button>
-                            )}
-                            <motion.button
-                              whileHover={{ scale: 1.05 }}
-                              whileTap={{ scale: 0.95 }}
-                              onClick={handleClearAll}
-                              className="p-2 text-[#ef4444] hover:bg-[#ef4444]/10 rounded-lg transition-colors"
-                              title="Clear all"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </motion.button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Alerts List */}
-                    <div className="p-4 max-h-[600px] lg:max-h-[720px] overflow-y-auto scrollbar-thin">
-                      {filteredAlerts.length === 0 ? (
-                        <div className="text-center py-8">
-                          <div className="w-12 h-12 mx-auto mb-3 rounded-xl bg-[#22c55e]/10 flex items-center justify-center">
-                            <CheckCircle2 className="w-6 h-6 text-[#22c55e]" />
-                          </div>
-                          <p className="text-sm font-medium text-[var(--text-primary)]">All Clear!</p>
-                          <p className="text-xs text-[var(--text-muted)]">No alerts at the moment</p>
-                        </div>
-                      ) : (
-                        <div className="space-y-2.5">
-                          <AnimatePresence mode="popLayout">
-                            {filteredAlerts.slice(0, 8).map((alert, index) => (
-                              <AlertCard
-                                key={alert.id}
-                                alert={alert}
-                                onAcknowledge={handleAcknowledge}
-                                onDismiss={clearAlert}
-                                index={index}
-                              />
-                            ))}
-                          </AnimatePresence>
-                          {filteredAlerts.length > 8 && (
-                            <p className="text-xs text-center text-[var(--text-muted)] pt-2">
-                              +{filteredAlerts.length - 8} more alerts
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </motion.div>
-
-                  {/* Activity Timeline & Daily Check-in side by side to fill the wide column */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <ActivityTimeline activities={activities} maxItems={5} />
-                    <DailyCheckIn 
-                      elderId={elderProfile.id}
-                      elderName={elderProfile.name}
-                      onToast={handleQuickActionToast}
-                    />
+                {/* Right column (spans 2) */}
+                <div className="col-span-2 space-y-6">
+                  {alertsCardEl}
+                  <div className="grid grid-cols-2 gap-6 items-start">
+                    {timelineEl}
+                    {dailyCheckInEl}
                   </div>
                 </div>
               </div>
@@ -455,30 +482,38 @@ export function Dashboard() {
           const result = await sendEmergency(elderProfile.id);
           if (result.success) {
             showToast({ type: "error", title: "Emergency Sent", message: "Emergency services have been alerted!" });
+          } else {
+            showToast({ type: "error", title: "Emergency Failed", message: result.error || "Could not send emergency alert." });
           }
         }}
         onCall={async () => {
+          // Immediate feedback so the action always feels responsive
+          const firstName = elderProfile.name.split(" ")[0];
+          showToast({ type: "info", title: "Calling", message: `Calling ${firstName}...` });
           const result = await sendEvent({
             elder_id: elderProfile.id,
             event_type: "normal",
             voice_transcript: `Family initiated call to ${elderProfile.name}`,
           });
-          if (result.success) {
-            showToast({ type: "info", title: "Calling", message: `Calling ${elderProfile.name.split(" ")[0]}...` });
+          if (!result.success) {
+            showToast({ type: "error", title: "Call Failed", message: result.error || "Could not reach the backend." });
           }
         }}
         onVideo={async () => {
+          const firstName = elderProfile.name.split(" ")[0];
+          showToast({ type: "info", title: "Video Call", message: `Starting video call with ${firstName}...` });
           const result = await sendEvent({
             elder_id: elderProfile.id,
             event_type: "normal",
             voice_transcript: `Family initiated video call to ${elderProfile.name}`,
           });
-          if (result.success) {
-            showToast({ type: "info", title: "Video Call", message: `Starting video call with ${elderProfile.name.split(" ")[0]}...` });
+          if (!result.success) {
+            showToast({ type: "error", title: "Video Call Failed", message: result.error || "Could not reach the backend." });
           }
         }}
         onMessage={() => {
-          showToast({ type: "info", title: "Message", message: "Use Quick Actions to send messages" });
+          // Open the actual message composer instead of a placeholder toast
+          setShowProfileMessage(true);
         }}
       />
 

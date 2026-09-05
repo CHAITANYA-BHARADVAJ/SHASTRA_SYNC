@@ -1,21 +1,21 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   X,
-  User,
   Phone,
   MapPin,
   Heart,
   Pill,
-  Bell,
   Shield,
   Mail,
-  Calendar,
   Edit3,
   LogOut,
+  Check,
 } from "lucide-react";
 import { ElderProfile as ElderProfileType } from "@/types/alerts";
+import { useFamilyMember, FamilyMember } from "@/hooks/useFamilyMember";
 
 interface ProfilePanelProps {
   isOpen: boolean;
@@ -26,11 +26,39 @@ interface ProfilePanelProps {
 }
 
 export function ProfilePanel({ isOpen, onClose, elder, onSignOut, onToast }: ProfilePanelProps) {
-  const familyMember = {
-    name: "Priya Sharma",
-    relation: "Daughter (Primary Caregiver)",
-    email: "priya.sharma@email.com",
-    phone: "+91 98765 12345",
+  // Shared source of truth so edits propagate to the dashboard / call flows.
+  const { familyMember, updateFamilyMember } = useFamilyMember();
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState<FamilyMember>(familyMember);
+
+  const startEdit = () => {
+    setForm(familyMember);
+    setIsEditing(true);
+  };
+
+  const cancelEdit = () => {
+    setForm(familyMember);
+    setIsEditing(false);
+  };
+
+  const saveEdit = () => {
+    // Basic validation: name required, email format if provided
+    if (!form.name.trim()) {
+      onToast?.("error", "Name Required", "Please enter a name.");
+      return;
+    }
+    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      onToast?.("error", "Invalid Email", "Please enter a valid email address.");
+      return;
+    }
+    updateFamilyMember({
+      name: form.name.trim(),
+      relation: form.relation.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim(),
+    });
+    setIsEditing(false);
+    onToast?.("success", "Profile Updated", "Your details have been saved.");
   };
 
   return (
@@ -81,33 +109,103 @@ export function ProfilePanel({ isOpen, onClose, elder, onSignOut, onToast }: Pro
                 </h3>
                 <div className="p-4 rounded-2xl bg-gradient-to-br from-[#c8ff00]/10 to-[#a78bfa]/10 border border-[var(--card-border)]">
                   <div className="flex items-center gap-4 mb-4">
-                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#c8ff00] to-[#a78bfa] flex items-center justify-center text-[#1a1d29] font-bold text-xl">
-                      {familyMember.name.charAt(0)}
+                    <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#c8ff00] to-[#a78bfa] flex items-center justify-center text-[#1a1d29] font-bold text-xl flex-shrink-0">
+                      {familyMember.name.charAt(0) || "?"}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-base font-bold text-[var(--text-primary)]">{familyMember.name}</p>
-                      <p className="text-xs text-[var(--text-muted)]">{familyMember.relation}</p>
+                    <div className="flex-1 min-w-0">
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={form.name}
+                            onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                            placeholder="Full name"
+                            className="w-full px-3 py-2 rounded-lg bg-[var(--input-bg)] border border-[var(--input-border)] text-sm font-semibold text-[var(--text-primary)] focus:outline-none focus:border-[#c8ff00]"
+                          />
+                          <input
+                            type="text"
+                            value={form.relation}
+                            onChange={(e) => setForm((f) => ({ ...f, relation: e.target.value }))}
+                            placeholder="Relation (e.g. Daughter)"
+                            className="w-full px-3 py-2 rounded-lg bg-[var(--input-bg)] border border-[var(--input-border)] text-xs text-[var(--text-secondary)] focus:outline-none focus:border-[#c8ff00]"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-base font-bold text-[var(--text-primary)] truncate">{familyMember.name}</p>
+                          <p className="text-xs text-[var(--text-muted)]">{familyMember.relation}</p>
+                        </>
+                      )}
                     </div>
                   </div>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
-                      <Mail className="w-4 h-4 text-[var(--text-muted)]" />
-                      {familyMember.email}
+
+                  {isEditing ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3">
+                        <Mail className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
+                        <input
+                          type="email"
+                          value={form.email}
+                          onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                          placeholder="Email"
+                          className="w-full px-3 py-2 rounded-lg bg-[var(--input-bg)] border border-[var(--input-border)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[#c8ff00]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Phone className="w-4 h-4 text-[var(--text-muted)] flex-shrink-0" />
+                        <input
+                          type="tel"
+                          value={form.phone}
+                          onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                          placeholder="Phone"
+                          className="w-full px-3 py-2 rounded-lg bg-[var(--input-bg)] border border-[var(--input-border)] text-sm text-[var(--text-primary)] focus:outline-none focus:border-[#c8ff00]"
+                        />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
-                      <Phone className="w-4 h-4 text-[var(--text-muted)]" />
-                      {familyMember.phone}
+                  ) : (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+                        <Mail className="w-4 h-4 text-[var(--text-muted)]" />
+                        {familyMember.email || "—"}
+                      </div>
+                      <div className="flex items-center gap-3 text-sm text-[var(--text-secondary)]">
+                        <Phone className="w-4 h-4 text-[var(--text-muted)]" />
+                        {familyMember.phone || "—"}
+                      </div>
                     </div>
-                  </div>
-                  <motion.button
-                    onClick={() => onToast?.("success", "Profile", "Edit profile coming soon")}
-                    whileHover={{ scale: 1.01 }}
-                    whileTap={{ scale: 0.99 }}
-                    className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--text-primary)] border border-[var(--border-primary)] hover:border-[#c8ff00]/50 transition-colors"
-                  >
-                    <Edit3 className="w-4 h-4" />
-                    Edit Profile
-                  </motion.button>
+                  )}
+
+                  {isEditing ? (
+                    <div className="flex gap-2 mt-4">
+                      <motion.button
+                        onClick={cancelEdit}
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        className="flex-1 py-2.5 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--text-secondary)] border border-[var(--border-primary)] hover:text-[var(--text-primary)] transition-colors"
+                      >
+                        Cancel
+                      </motion.button>
+                      <motion.button
+                        onClick={saveEdit}
+                        whileHover={{ scale: 1.01 }}
+                        whileTap={{ scale: 0.99 }}
+                        className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[#84cc16] text-white text-sm font-semibold shadow-sm"
+                      >
+                        <Check className="w-4 h-4" />
+                        Save
+                      </motion.button>
+                    </div>
+                  ) : (
+                    <motion.button
+                      onClick={startEdit}
+                      whileHover={{ scale: 1.01 }}
+                      whileTap={{ scale: 0.99 }}
+                      className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-[var(--bg-tertiary)] text-sm font-medium text-[var(--text-primary)] border border-[var(--border-primary)] hover:border-[#c8ff00]/50 transition-colors"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                      Edit Profile
+                    </motion.button>
+                  )}
                 </div>
               </div>
 

@@ -178,6 +178,25 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
     ];
   }, []);
 
+  // Parse a backend timestamp safely. Backends often emit ISO strings WITHOUT a
+  // timezone (e.g. "2026-09-04T08:15:33"), which JS would wrongly treat as LOCAL
+  // time. Such server times are virtually always UTC, so if no zone marker is
+  // present we append "Z" to parse it as UTC. Strings that already carry a zone
+  // (Z or +hh:mm) or are otherwise unparseable fall back gracefully.
+  const parseBackendTimestamp = useCallback((raw: string): Date => {
+    if (!raw) return new Date();
+    const hasZone = /[zZ]$|[+-]\d\d:?\d\d$/.test(raw.trim());
+    const normalized = hasZone ? raw : `${raw.trim()}Z`;
+    const d = new Date(normalized);
+    // If normalization produced an invalid date, fall back to the raw parse,
+    // then to "now" so the UI never shows "Invalid Date".
+    if (isNaN(d.getTime())) {
+      const fallback = new Date(raw);
+      return isNaN(fallback.getTime()) ? new Date() : fallback;
+    }
+    return d;
+  }, []);
+
   // Does an incoming alert look like an echo of a message we just sent?
   const isEchoOfSentMessage = useCallback((alertText: string) => {
     const haystack = alertText.toLowerCase();
@@ -202,7 +221,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
         message: familyAlert.message,
         severity: familyAlert.severity,
         reasoning_trace: familyAlert.reasoning_trace,
-        timestamp: new Date(familyAlert.timestamp),
+        timestamp: parseBackendTimestamp(familyAlert.timestamp),
         acknowledged: false,
       };
 
@@ -218,7 +237,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
         type: "alert",
         title: `${familyAlert.severity.toUpperCase()} Alert`,
         description: familyAlert.message,
-        timestamp: new Date(familyAlert.timestamp),
+        timestamp: parseBackendTimestamp(familyAlert.timestamp),
         severity: familyAlert.severity,
       };
       setActivities((prev) => {
@@ -259,7 +278,7 @@ export function useWebSocket(soundEnabled: boolean = true, volume: number = 0.7)
         return [activity, ...prev].slice(0, 50);
       });
     }
-  }, [playAlertSound, showBrowserNotification, isEchoOfSentMessage]);
+  }, [playAlertSound, showBrowserNotification, isEchoOfSentMessage, parseBackendTimestamp]);
 
   // Connect to WebSocket
   const connect = useCallback(() => {

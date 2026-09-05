@@ -3,19 +3,15 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useState } from "react";
 import { 
-  Bell, 
   Settings, 
   Wifi, 
   WifiOff, 
   RefreshCw,
-  Moon,
-  Sun,
   ChevronDown,
   User,
   Shield,
   Zap
 } from "lucide-react";
-import { useSettings } from "@/context/SettingsContext";
 
 interface HeaderProps {
   connectionStatus: "connected" | "connecting" | "disconnected" | "error";
@@ -25,7 +21,6 @@ interface HeaderProps {
   activeTab?: string;
   onTabChange?: (tab: string) => void;
   onSignOut?: () => void;
-  onNotificationsClick?: () => void;
   onProfileClick?: () => void;
   onNotificationPrefsClick?: () => void;
 }
@@ -43,18 +38,10 @@ export function Header({
   activeTab = "overview",
   onTabChange,
   onSignOut,
-  onNotificationsClick,
   onProfileClick,
   onNotificationPrefsClick,
 }: HeaderProps) {
-  const { settings, updateSettings } = useSettings();
   const [showUserMenu, setShowUserMenu] = useState(false);
-
-  const toggleDarkMode = () => {
-    const newMode = !settings.darkMode;
-    updateSettings({ darkMode: newMode });
-    document.documentElement.classList.toggle("dark", newMode);
-  };
 
   const getConnectionInfo = () => {
     switch (connectionStatus) {
@@ -101,15 +88,15 @@ export function Header({
       <div className="relative max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           {/* Left: Logo & Brand */}
-          <div className="flex items-center gap-6">
+          <div className="flex items-center gap-3 md:gap-6 min-w-0">
             {/* Logo */}
             <motion.div 
-              className="flex items-center gap-3"
+              className="flex items-center gap-2.5 min-w-0"
               whileHover={{ scale: 1.02 }}
             >
-              <div className="relative">
+              <div className="relative flex-shrink-0">
                 <motion.div 
-                  className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#c8ff00] to-[#a3e635] flex items-center justify-center shadow-lg"
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-[#c8ff00] to-[#a3e635] flex items-center justify-center shadow-lg"
                   whileHover={{ rotate: 5 }}
                 >
                   <Zap className="w-5 h-5 text-[#1a1d29]" />
@@ -117,11 +104,11 @@ export function Header({
                 {/* Glow effect */}
                 <div className="absolute inset-0 rounded-xl bg-[#c8ff00] blur-xl opacity-30" />
               </div>
-              <div className="hidden sm:block">
-                <h1 className="text-lg font-bold text-[var(--text-primary)]">
+              <div className="min-w-0">
+                <h1 className="text-base sm:text-lg font-bold text-[var(--text-primary)] truncate leading-tight">
                   Shastra<span className="text-[#c8ff00]">Sync</span>
                 </h1>
-                <p className="text-[10px] text-[var(--text-muted)] -mt-0.5 tracking-wide">
+                <p className="hidden sm:block text-[10px] text-[var(--text-muted)] -mt-0.5 tracking-wide">
                   ELDER CARE ANALYTICS
                 </p>
               </div>
@@ -151,14 +138,14 @@ export function Header({
           </div>
 
           {/* Right: Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             {/* Connection Status */}
             <motion.button
               onClick={(connectionStatus === "disconnected" || connectionStatus === "error") ? onReconnect : undefined}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               className={`
-                flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium
+                flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 rounded-xl text-sm font-medium
                 ${connInfo.bg} ${connInfo.color}
                 transition-all duration-200
                 ${(connectionStatus === "disconnected" || connectionStatus === "error") ? "cursor-pointer hover:bg-[#ef4444]/20" : "cursor-default"}
@@ -169,64 +156,41 @@ export function Header({
               <ConnIcon className={`w-4 h-4 ${connectionStatus === "connecting" ? "animate-spin" : ""}`} />
             </motion.button>
 
-            {/* Dark Mode Toggle */}
+            {/* Settings (with unread indicator) */}
             <motion.button
-              onClick={toggleDarkMode}
-              whileHover={{ scale: 1.05, rotate: 15 }}
-              whileTap={{ scale: 0.95 }}
-              className="btn-icon"
-            >
-              {settings.darkMode ? (
-                <Sun className="w-4 h-4 text-[#f59e0b]" />
-              ) : (
-                <Moon className="w-4 h-4" />
-              )}
-            </motion.button>
-
-            {/* Notifications */}
-            <motion.button
-              onClick={onNotificationsClick}
-              whileHover={{ scale: 1.05 }}
+              onClick={onSettingsClick}
+              whileHover={{ scale: 1.05, rotate: 45 }}
               whileTap={{ scale: 0.95 }}
               className="btn-icon relative"
+              aria-label="Settings"
             >
-              <Bell className="w-4 h-4" />
+              <Settings className="w-4 h-4" />
               {unreadCount > 0 && (
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1 }}
-                  className="absolute -top-1 -right-1 w-5 h-5 bg-[#ef4444] text-white text-[10px] font-bold rounded-full flex items-center justify-center"
+                  className="absolute -top-1 -right-1 w-4 h-4 bg-[#ef4444] text-white text-[9px] font-bold rounded-full flex items-center justify-center"
                 >
                   {unreadCount > 9 ? "9+" : unreadCount}
                 </motion.span>
               )}
             </motion.button>
 
-            {/* Settings */}
-            <motion.button
-              onClick={onSettingsClick}
-              whileHover={{ scale: 1.05, rotate: 45 }}
-              whileTap={{ scale: 0.95 }}
-              className="btn-icon"
-            >
-              <Settings className="w-4 h-4" />
-            </motion.button>
-
             {/* User Menu */}
-            <div className="relative ml-2">
+            <div className="relative sm:ml-1">
               <motion.button
                 onClick={() => setShowUserMenu(!showUserMenu)}
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border-primary)] hover:border-[#c8ff00]/50 transition-colors"
+                className="flex items-center gap-2 p-1 sm:pl-2 sm:pr-3 sm:py-1.5 rounded-xl bg-[var(--bg-tertiary)] border border-[var(--border-primary)] hover:border-[#c8ff00]/50 transition-colors"
               >
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#c8ff00] to-[#a78bfa] flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-[#c8ff00] to-[#a78bfa] flex items-center justify-center flex-shrink-0">
                   <User className="w-4 h-4 text-[#1a1d29]" />
                 </div>
                 <span className="hidden sm:block text-sm font-medium text-[var(--text-primary)]">
                   Family
                 </span>
-                <ChevronDown className={`w-4 h-4 text-[var(--text-muted)] transition-transform ${showUserMenu ? "rotate-180" : ""}`} />
+                <ChevronDown className={`hidden sm:block w-4 h-4 text-[var(--text-muted)] transition-transform ${showUserMenu ? "rotate-180" : ""}`} />
               </motion.button>
 
               {/* Dropdown Menu */}

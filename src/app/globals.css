@@ -54,50 +54,64 @@
    LIGHT MODE
    ============================================ */
 :root {
-  --bg-primary: #f8f9fc;
+  /* Light-mode accent: the neon lime (#c8ff00) is harsh and low-contrast on
+     white, so light mode uses a deeper, readable green instead. Dark mode keeps
+     the neon lime (see .dark below). */
+  --accent-primary: #65a30d;        /* readable green for text/borders on white */
+  --accent-primary-solid: #84cc16;  /* solid fills (buttons, active tab, FAB)   */
+  --accent-primary-strong: #4d7c0f; /* hover / emphasis                          */
+  --accent-on-primary: #ffffff;     /* text/icon color on a solid accent fill   */
+
+  --bg-primary: #eef1f6;
   --bg-secondary: #ffffff;
-  --bg-tertiary: #f1f3f9;
+  --bg-tertiary: #f3f5fa;
   --bg-elevated: #ffffff;
-  --bg-sunken: #e8ecf4;
-  --bg-hover: #f1f3f9;
+  --bg-sunken: #e4e8f0;
+  --bg-hover: #eaeef5;
   
-  --text-primary: #1a1d29;
-  --text-secondary: #4b5563;
-  --text-muted: #9ca3af;
+  --text-primary: #111827;
+  --text-secondary: #475569;
+  --text-muted: #6b7280;
   --text-inverse: #ffffff;
   
-  --border-primary: #e5e7eb;
-  --border-secondary: #f1f3f9;
-  --border-accent: #c8ff0050;
+  --border-primary: #dbe0ea;
+  --border-secondary: #eaeef5;
+  --border-accent: #84cc1655;
   
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.08);
-  --shadow-xl: 0 16px 48px rgba(0, 0, 0, 0.1);
-  --shadow-glow: 0 0 40px rgba(200, 255, 0, 0.15);
-  --shadow-purple-glow: 0 0 40px rgba(167, 139, 250, 0.2);
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.10);
+  --shadow-xl: 0 18px 50px rgba(15, 23, 42, 0.14);
+  --shadow-glow: 0 0 32px rgba(132, 204, 22, 0.18);
+  --shadow-purple-glow: 0 0 36px rgba(167, 139, 250, 0.2);
   
   --card-bg: #ffffff;
-  --card-border: #e5e7eb;
-  --card-hover-border: #c8ff0050;
+  --card-border: #dbe0ea;
+  --card-hover-border: #84cc1670;
   
   --nav-bg: #ffffff;
-  --nav-border: #e5e7eb;
-  --nav-active: #c8ff00;
+  --nav-border: #dbe0ea;
+  --nav-active: #84cc16;
   
-  --input-bg: #f8f9fc;
-  --input-border: #e5e7eb;
-  --input-focus: #c8ff00;
+  --input-bg: #f3f5fa;
+  --input-border: #d3d9e3;
+  --input-focus: #84cc16;
   
-  --scrollbar-track: #f1f3f9;
-  --scrollbar-thumb: #d1d5db;
-  --scrollbar-hover: #9ca3af;
+  --scrollbar-track: #eaeef5;
+  --scrollbar-thumb: #c4ccd8;
+  --scrollbar-hover: #9aa5b5;
 }
 
 /* ============================================
    DARK MODE
    ============================================ */
 .dark {
+  /* Dark mode keeps the neon lime — it looks great on dark backgrounds. */
+  --accent-primary: #c8ff00;
+  --accent-primary-solid: #c8ff00;
+  --accent-primary-strong: #b8ef00;
+  --accent-on-primary: #1a1d29;
+
   --bg-primary: #0f1117;
   --bg-secondary: #1a1d29;
   --bg-tertiary: #242837;
@@ -226,7 +240,7 @@ body {
 .card-interactive:hover {
   transform: translateY(-2px);
   box-shadow: var(--shadow-md);
-  border-color: var(--accent-lime);
+  border-color: var(--accent-primary-solid);
 }
 
 /* ============================================
@@ -277,21 +291,21 @@ body {
    BUTTONS
    ============================================ */
 .btn-primary {
-  background: var(--accent-lime);
-  color: #1a1d29;
+  background: var(--accent-primary-solid);
+  color: var(--accent-on-primary);
   font-weight: 600;
   padding: 12px 24px;
   border-radius: 12px;
   border: none;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 14px rgba(200, 255, 0, 0.3);
+  box-shadow: var(--shadow-md);
 }
 
 .btn-primary:hover {
-  background: var(--accent-lime-hover);
+  background: var(--accent-primary-strong);
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(200, 255, 0, 0.4);
+  box-shadow: var(--shadow-lg);
 }
 
 .btn-secondary {
@@ -307,7 +321,7 @@ body {
 
 .btn-secondary:hover {
   background: var(--bg-hover);
-  border-color: var(--accent-lime);
+  border-color: var(--accent-primary-solid);
 }
 
 .btn-ghost {
@@ -341,9 +355,9 @@ body {
 }
 
 .btn-icon:hover {
-  background: var(--accent-lime);
-  color: #1a1d29;
-  border-color: var(--accent-lime);
+  background: var(--accent-primary-solid);
+  color: var(--accent-on-primary);
+  border-color: var(--accent-primary-solid);
 }
 
 /* ============================================
@@ -366,7 +380,7 @@ body {
   left: 0;
   right: 0;
   height: 3px;
-  background: var(--accent-lime);
+  background: var(--accent-primary-solid);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
@@ -443,9 +457,9 @@ body {
 }
 
 .nav-tab-active {
-  color: #1a1d29;
-  background: var(--accent-lime);
-  box-shadow: 0 2px 8px rgba(200, 255, 0, 0.3);
+  color: var(--accent-on-primary);
+  background: var(--accent-primary-solid);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ============================================
@@ -462,11 +476,12 @@ body {
 }
 
 .badge-lime {
-  background: var(--accent-lime-muted);
-  color: #65a30d;
+  background: rgba(132, 204, 22, 0.15);
+  color: #4d7c0f;
 }
 
 .dark .badge-lime {
+  background: var(--accent-lime-muted);
   color: var(--accent-lime);
 }
 
@@ -911,7 +926,7 @@ body {
    FOCUS STYLES
    ============================================ */
 :focus-visible {
-  outline: 2px solid var(--accent-lime);
+  outline: 2px solid var(--accent-primary-solid);
   outline-offset: 2px;
 }
 
@@ -919,8 +934,44 @@ body {
    SELECTION
    ============================================ */
 ::selection {
-  background: var(--accent-lime);
-  color: #1a1d29;
+  background: var(--accent-primary-solid);
+  color: var(--accent-on-primary);
+}
+
+/* ============================================
+   LIGHT-MODE ACCENT SOFTENING
+   The neon lime (#c8ff00) is harsh on white. Many components use it as a raw
+   Tailwind arbitrary value (e.g. bg-[#c8ff00]). In LIGHT mode only, retint those
+   to a deeper, readable green. Dark mode is untouched.
+   ============================================ */
+:root:not(.dark) {
+  /* Solid lime fills -> readable green (toggles, pills, FAB, active buttons) */
+  .bg-\[\#c8ff00\] {
+    background-color: #84cc16 !important;
+  }
+  /* Lime text -> deeper green for contrast on light surfaces */
+  .text-\[\#c8ff00\] {
+    color: #4d7c0f !important;
+  }
+  /* Lime borders (focus rings, hover borders) */
+  .border-\[\#c8ff00\],
+  .focus\:border-\[\#c8ff00\]:focus {
+    border-color: #84cc16 !important;
+  }
+  /* Tinted lime backgrounds a touch stronger so they read on white */
+  .bg-\[\#c8ff00\]\/10,
+  .bg-\[\#c8ff00\]\/20,
+  .bg-\[\#c8ff00\]\/5 {
+    background-color: rgba(132, 204, 22, 0.12) !important;
+  }
+  /* Slider thumb */
+  .\[\&\:\:-webkit-slider-thumb\]\:bg-\[\#c8ff00\]::-webkit-slider-thumb {
+    background: #84cc16 !important;
+  }
+  /* Lime gradient starts -> green so gradient tiles/text aren't neon on white */
+  .from-\[\#c8ff00\] {
+    --tw-gradient-from: #84cc16 var(--tw-gradient-from-position) !important;
+  }
 }
 
 /* ============================================
