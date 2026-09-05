@@ -49,7 +49,7 @@ export function FallEmergencyModal({
   elderName = 'Kamala',
   initialEscalated = false,
 }) {
-  const [secondsRemaining, setSecondsRemaining] = useState(30);
+  const [secondsRemaining, setSecondsRemaining] = useState(15);
   const [isEscalated, setIsEscalated] = useState(Boolean(initialEscalated));
   const timerRef = useRef(null);
   const hasEscalatedRef = useRef(Boolean(initialEscalated));
@@ -78,7 +78,7 @@ export function FallEmergencyModal({
         return;
       }
 
-      setSecondsRemaining(30);
+      setSecondsRemaining(15);
       setIsEscalated(false);
       hasEscalatedRef.current = false;
 
@@ -100,6 +100,10 @@ export function FallEmergencyModal({
               hasEscalatedRef.current = true;
               setIsEscalated(true);
               if (onEmergencyEscalate) onEmergencyEscalate('Timeout - No Response from Senior');
+              // Auto-close the modal 5 seconds after escalation
+              setTimeout(() => {
+                if (onConfirmSafe) onConfirmSafe();
+              }, 5000);
             }
             return 0;
           }
@@ -139,7 +143,7 @@ export function FallEmergencyModal({
     }
   };
 
-  const progressPct = (secondsRemaining / 30) * 100;
+  const progressPct = (secondsRemaining / 15) * 100;
 
   return (
     <div className="emergency-modal-backdrop" role="dialog" aria-modal="true">
