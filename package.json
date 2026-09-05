@@ -1,7 +1,13 @@
 {
-  "name": "elder-app",
-  "private": true,
-  "version": "0.0.0",
+  "name": "t3-elderly-app",
+  "version": "1.0.0",
+  "description": "SHASTRA SYNC — Elder Companion Tablet Application (Teammate 3). Ambient home safety, voice companion with Indic neural TTS, fall emergency guardian, and bidirectional family caregiver sync.",
+  "author": "SuMEdH07",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SumedhSA3021/T3_Elderly_App.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",
