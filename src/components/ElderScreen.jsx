@@ -1424,6 +1424,11 @@ export default function ElderScreen() {
         payload.type === 'CallInvite' ||
         payload.type === 'call_invite' ||
         allTextHaystack.includes('call_invite') ||
+        allTextHaystack.includes('callinvite') ||
+        allTextHaystack.includes('initiated voice call') ||
+        allTextHaystack.includes('initiated video call') ||
+        allTextHaystack.includes('initiated call') ||
+        allTextHaystack.includes('family call') ||
         (payload.action === 'call' && (payload.caller_name || payload.sender));
 
       if (isCallInvite) {
@@ -1431,7 +1436,6 @@ export default function ElderScreen() {
         if (
           lowerText.includes('elder initiated phone call') ||
           lowerText.includes('calling priya') ||
-          lowerText.includes(`${currentElderName} is calling`) ||
           (payload.caller_name && payload.caller_name.toLowerCase().includes(currentElderName)) ||
           activeCallRef.current !== null // Cannot receive another call if already connected!
         ) {
@@ -1439,17 +1443,19 @@ export default function ElderScreen() {
         }
 
         let callerName = payload.caller_name || payload.sender || familyContactName || 'Family';
-        let callType = payload.call_type || 'voice';
-        let callId = payload.call_id || payload.decision_id || `call_${Date.now()}`;
+        let callType = (allTextHaystack.includes('video') || payload.call_type === 'video') ? 'video' : 'voice';
+        let callId = payload.call_id || payload.event_id || payload.decision_id || `call_${Date.now()}`;
 
         if (inviteMsg) {
           const parts = inviteMsg.split(':');
           if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
           if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
           if (parts[3] && parts[3].trim()) callId = parts[3].trim();
-        } else if (payload.call_type === 'video') {
-          callType = 'video';
         }
+
+        if (handledCallsRef.current.has(callId)) return;
+        handledCallsRef.current.add(callId);
+        setTimeout(() => handledCallsRef.current.delete(callId), 30000);
 
         console.log('📞 INCOMING CALL POP UP TRIGGERED FROM FAMILY DASHBOARD:', { callId, callerName, callType });
 
@@ -1909,7 +1915,7 @@ export default function ElderScreen() {
   const pollHandledEventsRef = useRef(new Set());
   useEffect(() => {
     const isEmergencyActive = fallModalOpen || sosSent || isEmergencyEscalated || hasSentEmergencyRef.current;
-    const intervalMs = isEmergencyActive ? 2000 : 6000;
+    const intervalMs = isEmergencyActive ? 1500 : 1000;
 
     const pollInterval = setInterval(async () => {
       try {
@@ -1977,36 +1983,41 @@ export default function ElderScreen() {
           if (isTooOld) continue;
 
           const isCallEvent =
-            (
-              evt.type === 'CallInvite' ||
-              evt.type === 'callinvite' ||
-              (typeof evt.family_message === 'string' && evt.family_message.includes('CALL_INVITE')) ||
-              (typeof evt.message === 'string' && evt.message.includes('CALL_INVITE'))
-            );
+            evt.type === 'CallInvite' ||
+            evt.type === 'callinvite' ||
+            evt.event_type === 'CallInvite' ||
+            allEvtText.includes('call_invite') ||
+            allEvtText.includes('callinvite') ||
+            allEvtText.includes('initiated voice call') ||
+            allEvtText.includes('initiated video call') ||
+            allEvtText.includes('initiated call') ||
+            allEvtText.includes('family call') ||
+            allEvtText.includes('calling kamala') ||
+            allEvtText.includes('calling elder') ||
+            (typeof evt.family_message === 'string' && evt.family_message.includes('CALL_INVITE')) ||
+            (typeof evt.message === 'string' && evt.message.includes('CALL_INVITE'));
 
           if (isCallEvent) {
-            const rawCallMsg = String(evt.family_message || evt.message || '');
-            // System calls or self calls must NEVER trigger an incoming call popup
+            // Ignore self calls initiated by elder tablet
             if (
-              rawCallMsg.toLowerCase().includes('kamala') ||
-              rawCallMsg.toLowerCase().includes('system') ||
-              (evt.caller_name && evt.caller_name.toLowerCase().includes('kamala')) ||
-              (evt.caller_name && evt.caller_name.toLowerCase().includes('system'))
+              allEvtText.includes('elder initiated') ||
+              allEvtText.includes('kamala initiated') ||
+              (evt.sender && evt.sender.toLowerCase().includes('kamala')) ||
+              activeCallRef.current !== null
             ) {
               continue;
             }
 
-            let callType = 'voice';
-            let callerName = evt.caller_name || evt.sender || 'Priya (Daughter)';
-            let callId = evt.call_id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            let callType = (allEvtText.includes('video') || evt.call_type === 'video') ? 'video' : 'voice';
+            let callerName = evt.caller_name || evt.sender_name || (evt.sender && !evt.sender.toLowerCase().includes('kamala') ? evt.sender : null) || familyContactName || 'Family';
+            let callId = evt.call_id || evt.event_id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
 
+            const rawCallMsg = String(evt.family_message || evt.message || '');
             if (rawCallMsg.includes('CALL_INVITE')) {
               const parts = rawCallMsg.split(':');
               if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
               if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
               if (parts[3] && parts[3].trim()) callId = parts[3].trim();
-            } else if (evt.call_type === 'video') {
-              callType = 'video';
             }
 
             if (handledCallsRef.current.has(callId)) continue;
