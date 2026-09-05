@@ -49,7 +49,9 @@ export function FallEmergencyModal({
   elderName = 'Kamala',
 }) {
   const [secondsRemaining, setSecondsRemaining] = useState(30);
+  const [isEscalated, setIsEscalated] = useState(false);
   const timerRef = useRef(null);
+  const hasEscalatedRef = useRef(false);
 
   const t = MODAL_I18N[selectedLang] || MODAL_I18N['en-IN'];
   const defaultFallPrompt = `${elderName}, did you fall? Are you fine? Please let us know if you need help.`;
@@ -58,13 +60,19 @@ export function FallEmergencyModal({
   useEffect(() => {
     if (isOpen) {
       setSecondsRemaining(30);
+      setIsEscalated(false);
+      hasEscalatedRef.current = false;
       playEmergencyAlarm();
 
       timerRef.current = setInterval(() => {
         setSecondsRemaining((prev) => {
           if (prev <= 1) {
             clearInterval(timerRef.current);
-            if (onEmergencyEscalate) onEmergencyEscalate('Timeout - No Response from Elder');
+            if (!hasEscalatedRef.current) {
+              hasEscalatedRef.current = true;
+              setIsEscalated(true);
+              if (onEmergencyEscalate) onEmergencyEscalate('Timeout - No Response from Senior');
+            }
             return 0;
           }
           if (prev % 5 === 0) {
@@ -74,6 +82,8 @@ export function FallEmergencyModal({
         });
       }, 1000);
     } else {
+      setIsEscalated(false);
+      hasEscalatedRef.current = false;
       if (timerRef.current) clearInterval(timerRef.current);
     }
 
@@ -86,13 +96,19 @@ export function FallEmergencyModal({
 
   const handleSafeClick = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    setIsEscalated(false);
+    hasEscalatedRef.current = false;
     playSuccessChime();
     onConfirmSafe();
   };
 
   const handleHelpClick = () => {
     if (timerRef.current) clearInterval(timerRef.current);
-    if (onEmergencyEscalate) onEmergencyEscalate('Manual Emergency Escalation');
+    if (!hasEscalatedRef.current) {
+      hasEscalatedRef.current = true;
+      setIsEscalated(true);
+      if (onEmergencyEscalate) onEmergencyEscalate('Manual Emergency Escalation');
+    }
   };
 
   const progressPct = (secondsRemaining / 30) * 100;
@@ -106,25 +122,44 @@ export function FallEmergencyModal({
           <span className="beacon-icon">🚨</span>
         </div>
 
-        <h1 className="emergency-title">{t.title}</h1>
-        <h2 className="emergency-hindi-title">{t.subtitle}</h2>
+        <h1 className="emergency-title">
+          {isEscalated
+            ? (selectedLang === 'kn-IN' ? 'ತುರ್ತು ಅಧಿಕಾರ ಹೆಚ್ಚಳ' : selectedLang === 'hi-IN' ? 'आपातकालीन अलर्ट सक्रिय' : 'PRIVILEGES ESCALATED')
+            : t.title}
+        </h1>
+        <h2 className="emergency-hindi-title">
+          {isEscalated
+            ? (selectedLang === 'kn-IN' ? 'ಕುಟುಂಬ ಮತ್ತು ಬೆಂಬಲ ತಂಡಕ್ಕೆ ಮಾಹಿತಿ ನೀಡಲಾಗಿದೆ' : selectedLang === 'hi-IN' ? 'परिवार और सहायता टीम को अलर्ट भेजा गया' : 'Emergency Alert Dispatched to Family & Support')
+            : t.subtitle}
+        </h2>
 
         <p className="emergency-reason-text">
-          {localizedReason}
+          {isEscalated
+            ? (selectedLang === 'kn-IN' ? 'ಪಾಲನೆದಾರರ ದೃಢೀಕರಣಕ್ಕಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ. ನೀವು ಕ್ಷೇಮವಾಗಿದ್ದರೆ ಕೆಳಗಿನ ಬಟನ್ ಒತ್ತಿ.' : selectedLang === 'hi-IN' ? 'देखभालकर्ता की पुष्टि की प्रतीक्षा है। यदि आप ठीक हैं तो नीचे दबाएं।' : 'Caregivers and emergency team have been notified. Waiting for family acknowledgment...')
+            : localizedReason}
         </p>
 
-        {/* 30-Second Countdown Meter */}
-        <div className="emergency-countdown-box">
-          <div className="countdown-number">{secondsRemaining}{t.secondsShort}</div>
-          <div className="countdown-label">{t.countdownLabel}</div>
-          <div className="countdown-bar-bg">
-            <div className="countdown-bar-fill" style={{ transform: `scaleX(${progressPct / 100})` }} />
+        {/* 30-Second Countdown Meter OR Escalated Mode Banner */}
+        {!isEscalated ? (
+          <div className="emergency-countdown-box">
+            <div className="countdown-number">{secondsRemaining}{t.secondsShort}</div>
+            <div className="countdown-label">{t.countdownLabel}</div>
+            <div className="countdown-bar-bg">
+              <div className="countdown-bar-fill" style={{ transform: `scaleX(${progressPct / 100})` }} />
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="emergency-escalated-status-box">
+            <div className="escalated-pulse-dot"></div>
+            <span className="escalated-status-text">
+              {selectedLang === 'kn-IN' ? '● ತುರ್ತು ಬೆಂಬಲ ಸಂಪರ್ಕದಲ್ಲಿದೆ • ರದ್ದತಿಗೆ ಲಭ್ಯ' : selectedLang === 'hi-IN' ? '● आपातकालीन अलर्ट सक्रिय • कभी भी रद्द करें' : '● Emergency Notification Active • Cancel Anytime'}
+            </span>
+          </div>
+        )}
 
         {/* Big Accessible Choice Actions */}
         <div className="emergency-actions-grid">
-          <button className="btn-modal-safe" onClick={handleSafeClick}>
+          <button className="btn-modal-safe" onClick={handleSafeClick} style={isEscalated ? { width: '100%' } : {}}>
             <span className="btn-modal-icon">💚</span>
             <div className="btn-modal-text">
               <span className="modal-primary">{t.safePrimary}</span>
@@ -132,13 +167,15 @@ export function FallEmergencyModal({
             </div>
           </button>
 
-          <button className="btn-modal-help" onClick={handleHelpClick}>
-            <span className="btn-modal-icon">🚨</span>
-            <div className="btn-modal-text">
-              <span className="modal-primary">{t.helpPrimary}</span>
-              <span className="modal-secondary">{t.helpSub}</span>
-            </div>
-          </button>
+          {!isEscalated && (
+            <button className="btn-modal-help" onClick={handleHelpClick}>
+              <span className="btn-modal-icon">🚨</span>
+              <div className="btn-modal-text">
+                <span className="modal-primary">{t.helpPrimary}</span>
+                <span className="modal-secondary">{t.helpSub}</span>
+              </div>
+            </button>
+          )}
         </div>
       </div>
     </div>

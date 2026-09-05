@@ -150,6 +150,37 @@
   transition: transform 1s linear;
 }
 
+/* Escalated Mode Status Box */
+.emergency-escalated-status-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: rgba(225, 29, 72, 0.25);
+  border: 1.5px solid rgba(251, 113, 133, 0.6);
+  border-radius: 20px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 0 30px rgba(225, 29, 72, 0.35);
+}
+
+.escalated-pulse-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #EF4444;
+  box-shadow: 0 0 12px #EF4444;
+  animation: beacon-ring-pulse 1.2s infinite;
+  flex-shrink: 0;
+}
+
+.escalated-status-text {
+  font-size: 15px;
+  font-weight: 800;
+  color: #FECDD3;
+  letter-spacing: 0.04em;
+}
+
 /* Big Action Choice Buttons */
 .emergency-actions-grid {
   display: grid;

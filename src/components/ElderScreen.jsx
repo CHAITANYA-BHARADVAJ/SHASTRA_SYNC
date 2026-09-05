@@ -475,6 +475,8 @@ export default function ElderScreen() {
   const ALERT_COOLDOWN_MS = 30000; // 30-second rock-solid cooldown after dismissal
   const fallModalOpenRef = useRef(false);
   fallModalOpenRef.current = fallModalOpen;
+  // Strict once-only emergency latch: guarantee exactly ONE emergency request is sent per incident
+  const hasSentEmergencyRef = useRef(false);
 
   // Pure derived localization for active alert message: 0ms latency on language switch
   const displayedAlertMessage = rawAlertMessage
@@ -529,6 +531,7 @@ export default function ElderScreen() {
   /**
    * Empathetic Fall Emergency Trigger:
    * Displays compassionate "Did you fall? Are you fine?" prompt and speaks to senior.
+   * Clears any active call overlays so the critical emergency interface has 100% focus.
    */
   const triggerFallAlert = useCallback((customReason) => {
     // 1. Active cooldown protection: elder just pressed "I AM OKAY"
@@ -542,6 +545,11 @@ export default function ElderScreen() {
       return;
     }
 
+    // STRICTLY SUPPRESS ALL SYSTEM CALLS: Critical Emergency takes absolute priority
+    setActiveCall(null);
+    setIncomingCall(null);
+    setOutgoingCall(null);
+
     const name = elderProfile?.name?.split(' ')[0] || 'Kamala';
     const empatheticPrompt = `${name}, did you fall? Are you fine? Please confirm if you are okay.`;
     setFallReason(customReason || empatheticPrompt);
@@ -552,10 +560,11 @@ export default function ElderScreen() {
 
   /**
    * Reset the active backend emergency/escalation mode.
-   * Sets a 30s cooldown timestamp and resolves the alert cleanly.
+   * Sets a 30s cooldown timestamp, resets emergency latch, and resolves the alert cleanly.
    */
   const handleFallModalSafe = useCallback(async () => {
     stop();
+    hasSentEmergencyRef.current = false;
     setFallModalOpen(false);
     setBackendAlertActive(false);
     setSosSent(false);
@@ -600,85 +609,65 @@ export default function ElderScreen() {
   }, [stop, speak, selectedLang, t, sendMessage]);
 
   /**
-   * Primary SOS Panic Button (Major Button 1)
-   * Dispatches via Hub REST API (triggering immediate Hub FamilyAlert broadcast)
-   * and direct WebSocket for instantaneous alert cards on Teammate 4's dashboard.
+   * Primary Emergency SOS Dispatch (Major Button 1 & Escalation)
+   * Dispatches ONCE ONLY per incident to prevent request flooding and loops.
+   * Sends exactly 1 canonical SensorEvent (HTTP) and 1 WebSocket broadcast.
+   * STRICTLY NEVER INITIATES ANY SYSTEM CALLS.
    */
-  const handleSOS = useCallback(async () => {
-    const now = Date.now();
-    if (now - lastSosTimeRef.current < 2000) return;
-    lastSosTimeRef.current = now;
+  const handleSOS = useCallback(async (customReason) => {
+    // 1. Strict once-only latch: do not send multiple duplicate emergency requests
+    if (hasSentEmergencyRef.current) {
+      console.log('🛡️ Emergency request already dispatched once for this incident. Suppressing duplicate network requests.');
+      return;
+    }
+    hasSentEmergencyRef.current = true;
+    lastSosTimeRef.current = Date.now();
 
     setSosSent(true);
-    setFallModalOpen(false); // Do not open generic fall questionnaire when elder explicitly pressed SOS
     playEmergencyAlarm();
 
-    const eventId = crypto.randomUUID ? crypto.randomUUID() : `evt_${Date.now()}`;
-    const decId = `dec_${Date.now()}`;
-    const elderName = elderProfile?.name || 'Kamala Devi';
-    const alertMsg = `🚨 CRITICAL EMERGENCY: ${elderName} pressed SOS Button on tablet!`;
+    // STRICTLY SUPPRESS ALL CALL OVERLAYS: Emergency takes total precedence
+    setActiveCall(null);
+    setIncomingCall(null);
+    setOutgoingCall(null);
 
-    // Register in dedup set so own decision does not loop back to open questionnaire
-    processedDecisionsRef.current.add(decId);
+    const eventId = crypto.randomUUID ? crypto.randomUUID() : `evt_${Date.now()}`;
+    const elderName = elderProfile?.name || 'Kamala Devi';
+    const reasonText = typeof customReason === 'string' && customReason.trim()
+      ? customReason
+      : `Emergency SOS triggered by ${elderName}`;
+    const alertMsg = `🚨 CRITICAL EMERGENCY: ${elderName} requires urgent assistance! (${reasonText})`;
+
+    // Register in dedup set so own event does not loop back to elder
     processedDecisionsRef.current.add(eventId);
 
-    const payload = buildSensorEvent({
-      eventType: 'manual_panic',
-      confidence: 1.0,
-      eventId: eventId,
-    });
-
-    // 1. Direct WebSocket Broadcasts to Teammate 4's Dashboard
-    sendMessage({
-      type: 'FamilyAlert',
-      alert_id: `alert_${Date.now()}`,
-      decision_id: decId,
-      message: alertMsg,
-      severity: 'critical',
-      reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
-      timestamp: new Date().toISOString(),
-    });
-
-    sendMessage({
-      type: 'AgentDecision',
-      decision_id: decId,
-      event_id: eventId,
-      severity: 'critical',
-      action: 'call_emergency',
-      reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
-      voice_message_to_elder: 'Emergency services and your family have been notified.',
-      language_code: 'en-IN',
-      family_message: alertMsg,
-      timestamp: new Date().toISOString(),
-    });
-
+    // Exactly ONE WebSocket Broadcast to Teammate 4 Family Dashboard
     sendMessage({
       type: 'manual_panic',
-      elder_id: 'kamala_001',
+      elder_id: ELDER_ID,
       event_type: 'manual_panic',
       severity: 'critical',
       alert: alertMsg,
+      message: alertMsg,
+      reason: reasonText,
       timestamp: new Date().toISOString(),
     });
 
-    // 2. Hub REST API POSTs
+    // Exactly ONE Hub REST API POST
+    const payload = buildSensorEvent({
+      eventType: 'manual_panic',
+      severity: 'critical',
+      confidence: 1.0,
+      eventId: eventId,
+      voiceTranscript: reasonText,
+      sender: `${elderName} (Elder)`,
+    });
+
     try {
-      await Promise.allSettled([
-        postSensorEvent(payload),
-        postDecision({
-          type: 'AgentDecision',
-          decision_id: decId,
-          event_id: eventId,
-          severity: 'critical',
-          action: 'call_emergency',
-          reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
-          voice_message_to_elder: 'Emergency services and your family have been notified.',
-          language_code: 'en-IN',
-          family_message: alertMsg,
-        }),
-      ]);
+      await postSensorEvent(payload);
+      console.log('✓ Emergency SensorEvent dispatched once to Hub:', eventId);
     } catch (e) {
-      console.warn('Failed to post SOS to Hub:', e);
+      console.warn('Failed to post emergency event to Hub:', e);
     }
   }, [sendMessage, elderProfile]);
 
@@ -686,6 +675,7 @@ export default function ElderScreen() {
    * Cancel Emergency SOS / Confirm Safe
    */
   const handleCancelSOS = useCallback(async () => {
+    hasSentEmergencyRef.current = false;
     setSosSent(false);
     setFallModalOpen(false);
     playSuccessChime();
@@ -706,7 +696,7 @@ export default function ElderScreen() {
       voiceTranscript: 'User confirmed: I am safe, cancel emergency alert.',
     });
     postSensorEvent(payload).catch(() => {});
-  }, [selectedLang, speak, sendMessage]);
+  }, [selectedLang, speak, sendMessage, elderProfile]);
 
   /**
    * Quick Mood Check-In Handler (Schema A: event_type = "emotion_detected")
@@ -1194,24 +1184,8 @@ export default function ElderScreen() {
           setOutgoingCall(null);
           triggerFallAlert(transcript);
 
-          const panicPayload = buildSensorEvent({
-            eventType: 'manual_panic',
-            confidence: 1.0,
-            voiceTranscript: transcript,
-            sender: 'Kamala Devi (Elder)',
-          });
-          try {
-            postSensorEvent(panicPayload);
-          } catch (e) {}
-
-          sendMessage({
-            type: 'manual_panic',
-            elder_id: ELDER_ID,
-            action: 'call_emergency',
-            severity: 'critical',
-            transcript: transcript,
-            timestamp: new Date().toISOString(),
-          });
+          // Dispatch the emergency request ONCE only
+          handleSOS(transcript);
           return;
         }
 
@@ -1428,6 +1402,7 @@ export default function ElderScreen() {
       if (isAck) {
         // STOP the Fall Emergency modal and alarm chime immediately!
         stop();
+        hasSentEmergencyRef.current = false;
         setFallModalOpen(false);
         setBackendAlertActive(false);
         setSosSent(false);
@@ -1577,15 +1552,19 @@ export default function ElderScreen() {
               ? payload.message
               : '';
 
+      // Calls from system or during active emergency are strictly forbidden
       const isCallRequest =
+        !hasSentEmergencyRef.current &&
+        !fallModalOpen &&
+        !sosSent &&
         !isCriticalEmergency &&
         action !== 'call_emergency' &&
         action !== 'emergency_escalate' &&
         severity !== 'critical' &&
         (
-          Boolean(inviteMsg) ||
-          type === 'callinvite' ||
-          payload.type === 'CallInvite'
+          (Boolean(inviteMsg) && !inviteMsg.toLowerCase().includes('system') && !inviteMsg.toLowerCase().includes(currentElderName)) ||
+          (type === 'callinvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes(currentElderName)) ||
+          (payload.type === 'CallInvite' && payload.caller_name && !payload.caller_name.toLowerCase().includes(currentElderName))
         );
 
       if (isCallRequest) {
@@ -1880,12 +1859,17 @@ export default function ElderScreen() {
   }, [lastMessage, classifyAndDispatchMessage]);
 
   // Live Event Polling: catches calls/events posted to /api/events by Family Dashboard (Teammate 4)
-  // Guarantees call pop-up within ~1s even when WebSocket does not relay client frames
+  // Throttled to 6s and strictly paused during active emergency to eliminate duplicate request flooding
   const pollHandledEventsRef = useRef(new Set());
   useEffect(() => {
     const pollInterval = setInterval(async () => {
+      // Pause polling during active emergency to avoid request flooding and echo loops
+      if (fallModalOpen || sosSent || hasSentEmergencyRef.current) {
+        return;
+      }
+
       try {
-        const events = await fetchLatestEvents();
+        const events = await fetchLatestEvents(5);
         if (!Array.isArray(events) || events.length === 0) return;
 
         for (const evt of events) {
@@ -1903,6 +1887,7 @@ export default function ElderScreen() {
             evt.type,
           ].filter(Boolean).join(' ').toLowerCase();
 
+          // Emergency events are already handled via WebSocket / direct triggers; skip in polling to prevent loops
           const isCriticalEvent =
             evt.severity === 'critical' ||
             evt.action === 'call_emergency' ||
@@ -1911,23 +1896,13 @@ export default function ElderScreen() {
             evt.event_type === 'fall' ||
             evt.event_type === 'manual_panic' ||
             evt.type === 'fall' ||
-            evt.type === 'manual_panic' ||
-            [
-              'need help', 'i need help', 'i have fallen', 'have fallen', 'fallen', 'i fell',
-              'fell down', 'did you fall', 'fall', 'critical', 'emergency', 'unresponsive',
-              'chest pain', 'severe pain', '112'
-            ].some((kw) => allEvtText.includes(kw));
+            evt.type === 'manual_panic';
 
           if (isCriticalEvent) {
-            setActiveCall(null);
-            setIncomingCall(null);
-            setOutgoingCall(null);
-            classifyAndDispatchMessage(evt);
-            break;
+            continue;
           }
 
           const isCallEvent =
-            !isCriticalEvent &&
             (
               evt.type === 'CallInvite' ||
               evt.type === 'callinvite' ||
@@ -1937,6 +1912,15 @@ export default function ElderScreen() {
 
           if (isCallEvent) {
             const rawCallMsg = String(evt.family_message || evt.message || '');
+            // System calls or self calls must NEVER trigger an incoming call popup
+            if (
+              rawCallMsg.toLowerCase().includes('kamala') ||
+              rawCallMsg.toLowerCase().includes('system') ||
+              (evt.caller_name && evt.caller_name.toLowerCase().includes('kamala'))
+            ) {
+              continue;
+            }
+
             let callType = 'voice';
             let callerName = evt.caller_name || evt.sender || 'Priya (Daughter)';
             let callId = evt.call_id || `call_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -1986,10 +1970,10 @@ export default function ElderScreen() {
       } catch (err) {
         // Silent network retry
       }
-    }, 1200);
+    }, 6000);
 
     return () => clearInterval(pollInterval);
-  }, [classifyAndDispatchMessage]);
+  }, [classifyAndDispatchMessage, fallModalOpen, sosSent]);
 
   // Simulation Handlers for Team Demonstration & Testing
   const simulateIncomingFamilyMessage = useCallback((sender = 'Priya (Daughter)', text = 'Had lunch Amma? Taking my break now, visiting this evening! ❤️') => {
