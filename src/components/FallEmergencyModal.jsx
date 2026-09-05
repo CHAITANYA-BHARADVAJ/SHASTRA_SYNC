@@ -4,55 +4,56 @@ import { localizeMessage } from '../utils/translator';
 import './FallEmergencyModal.css';
 
 const MODAL_I18N = {
+  'en-IN': {
+    title: 'DID YOU FALL? ARE YOU OKAY?',
+    subtitle: 'Did you fall? Are you fine? Please confirm if you are safe or we will call for help.',
+    countdownLabel: 'Connecting to 112 & Family Help in:',
+    safePrimary: 'I AM OKAY',
+    safeSub: 'I am fine • Cancel Alert',
+    helpPrimary: 'I NEED HELP',
+    helpSub: 'Call 112 & Family Now',
+    secondsShort: 's',
+  },
   'kn-IN': {
-    title: 'ನೀವು ಕ್ಷೇಮವಾಗಿದ್ದೀರಾ?',
-    subtitle: 'ಕಮಲಾ ಅವರೇ, ನಿಮಗೆ ಯಾವುದೇ ತೊಂದರೆಯಾಗಿದೆಯೇ?',
+    title: 'ನೀವು ಕೆಳಗೆ ಬಿದ್ದಿದ್ದೀರಾ? ಕ್ಷೇಮವಾಗಿದ್ದೀರಾ?',
+    subtitle: 'ಕಮಲಾ ಅವರೇ, ನೀವು ಬಿದ್ದಿದ್ದೀರಾ? ನಿಮಗೆ ಆರಾಮವಿದೆಯೇ? ದಯವಿಟ್ಟು ತಿಳಿಸಿ.',
     countdownLabel: 'ಸ್ವಯಂಚಾಲಿತ ತುರ್ತು ಕರೆ ಇನ್ನು:',
     safePrimary: 'ನಾನು ಕ್ಷೇಮವಾಗಿದ್ದೇನೆ',
-    safeSub: 'ಎಚ್ಚರಿಕೆ ರದ್ದುಮಾಡಿ',
+    safeSub: 'ನಾನು ಚೆನ್ನಾಗಿದ್ದೇನೆ • ಎಚ್ಚರಿಕೆ ರದ್ದುಮಾಡಿ',
     helpPrimary: 'ತಕ್ಷಣ ಸಹಾಯ ಬೇಕು',
     helpSub: '೧೧೨ ಮತ್ತು ಕುಟುಂಬಕ್ಕೆ ಕರೆ',
     secondsShort: 'ಸೆ',
   },
   'hi-IN': {
-    title: 'क्या आप ठीक हैं?',
-    subtitle: 'कमला जी, क्या आपको किसी मदद की ज़रूरत है?',
+    title: 'क्या आप गिर गए हैं? क्या आप ठीक हैं?',
+    subtitle: 'कमला जी, क्या आप गिर गईं? क्या आप ठीक हैं? कृपया बताएं।',
     countdownLabel: 'स्वतः आपातकालीन कॉल में शेष समय:',
     safePrimary: 'मैं ठीक हूँ',
-    safeSub: 'अलर्ट रद्द करें',
+    safeSub: 'मैं सुरक्षित हूँ • अलर्ट रद्द करें',
     helpPrimary: 'तुरंत मदद चाहिए',
     helpSub: '112 और परिवार को कॉल',
     secondsShort: 'से',
-  },
-  'en-IN': {
-    title: 'ARE YOU OKAY?',
-    subtitle: 'Kamala, did you fall or need assistance?',
-    countdownLabel: 'Automatic Emergency Call in:',
-    safePrimary: 'I AM OKAY',
-    safeSub: 'Cancel Alert',
-    helpPrimary: 'SEND HELP NOW',
-    helpSub: 'Call 112 & Family',
-    secondsShort: 's',
   },
 };
 
 /**
  * Fall & Critical Distress Emergency Verification Modal.
- * Prompts the senior with an urgent 30s voice/tap countdown.
- * Strictly respects selectedLang for zero English leak.
+ * Prompts the senior with an empathetic, caring voice/tap countdown.
  */
 export function FallEmergencyModal({
   isOpen,
   fallReason,
   onConfirmSafe,
   onEmergencyEscalate,
-  selectedLang = 'kn-IN',
+  selectedLang = 'en-IN',
+  elderName = 'Kamala',
 }) {
   const [secondsRemaining, setSecondsRemaining] = useState(30);
   const timerRef = useRef(null);
 
-  const t = MODAL_I18N[selectedLang] || MODAL_I18N['kn-IN'];
-  const localizedReason = localizeMessage(fallReason, selectedLang);
+  const t = MODAL_I18N[selectedLang] || MODAL_I18N['en-IN'];
+  const defaultFallPrompt = `${elderName}, did you fall? Are you fine? Please let us know if you need help.`;
+  const localizedReason = fallReason ? localizeMessage(fallReason, selectedLang) : defaultFallPrompt;
 
   useEffect(() => {
     if (isOpen) {

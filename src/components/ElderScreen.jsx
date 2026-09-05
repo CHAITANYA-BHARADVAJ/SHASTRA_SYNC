@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useVoiceHandler } from '../hooks/useVoiceHandler';
 import { useCheckInScheduler } from '../hooks/useCheckInScheduler';
@@ -7,9 +7,11 @@ import { FallEmergencyModal } from './FallEmergencyModal';
 import { postSensorEvent, postDecision, fetchLatestEvents, fetchLatestDecisions } from '../api/api';
 import { playEmergencyAlarm, playGentleChime, playSuccessChime } from '../utils/audioChimes';
 import { localizeMessage, getLocalizedTierLabel } from '../utils/translator';
+import ElderProfileView from './ElderProfileView';
+import { generateCompanionDecision, dispatchCompanionDecision } from '../services/ElderAiCompanionService';
 import './ElderScreen.css';
 
-const ELDER_ID = import.meta.env.VITE_ELDER_ID || 'elder_kamala_001';
+const ELDER_ID = import.meta.env.VITE_ELDER_ID || 'kamala_001';
 
 /**
  * UI Translations (English)
@@ -90,8 +92,8 @@ const I18N = {
     inactivityPrompt: 'Checking in to see if you are resting comfortably.',
 
     // Escalation Mode Translations
-    alertTitle: 'Are you okay?',
-    alertSub: 'Emergency Guardian detected an anomaly • Please confirm you are safe',
+    alertTitle: 'Did you fall? Are you okay?',
+    alertSub: 'Did you fall? Are you fine? Please confirm if you are safe or we will call for help.',
     yesImFineBtn: 'I\'M OKAY — STOP TIMER',
     yesImFineSub: 'Reset and cancel emergency escalation',
     fineConfirmationTts: 'Glad you are safe. Escalation cancelled.',
@@ -142,6 +144,133 @@ const I18N = {
     drawerSleep: '🌙 Sleep Quality',
     drawerMobility: '🚶 Mobility steadiness',
   },
+  'kn-IN': {
+    appName: 'ಶಾಸ್ತ್ರ ಗಾರ್ಡಿಯನ್',
+    appSub: 'ಹಿರಿಯರ ಸುರಕ್ಷತೆ & ಒಡನಾಡಿ',
+    familySynced: 'ಕುಟುಂಬ ಸಂಪರ್ಕದಲ್ಲಿದೆ',
+    calmStatus: 'ಕಮಲಾ ಅವರು ಸುರಕ್ಷಿತವಾಗಿದ್ದಾರೆ',
+    calmSub: 'ಶಾಸ್ತ್ರ ವಿಷನ್ ಸಕ್ರಿಯ • ಸಾಮಾನ್ಯ ಭಂಗಿ & ಕ್ಷೇಮ',
+    listening: 'ಆಲಿಸುತ್ತಿದೆ...',
+    listeningSub: 'ನಿಮ್ಮ ಮಾತೃಭಾಷೆಯಲ್ಲಿ ಮಾತನಾಡಿ',
+    sentConfirmation: '✓ ಸಂದೇಶ ರವಾನಿಸಲಾಗಿದೆ',
+    sosSentStatus: 'ತುರ್ತು ಎಚ್ಚರಿಕೆ ರವಾನಿಸಲಾಗಿದೆ',
+    sosSentSub: '೧೧೨ ಮತ್ತು ಕುಟುಂಬಕ್ಕೆ ರವಾನಿಸಲಾಗಿದೆ • ಸಹಾಯ ಬರುತ್ತಿದೆ',
+    speakingStatus: 'ಒಡನಾಡಿ ಮಾತನಾಡುತ್ತಿದೆ...',
+    speakingSub: 'ಧ್ವನಿ ಸಹಾಯಕ ಮಾತನಾಡುತ್ತಿದೆ',
+    reconnectingStatus: 'ಕ್ಲೌಡ್ ಮರುಸಂಪರ್ಕ...',
+    reconnectingSub: 'ಲೈವ್ ಸ್ಟ್ರೀಮ್ ಸಂಪರ್ಕಿಸಲಾಗುತ್ತಿದೆ',
+
+    // Companion Persona
+    companionGreeting: 'ನಮಸ್ಕಾರ, ಕಮಲಾ ಅವರೇ',
+    companionGreetingSub: 'ನಾನು ನಿಮ್ಮ ಆರೈಕೆ ಒಡನಾಡಿ. ಇಂದು ನಿಮ್ಮ ದಿನ ಹೇಗಿದೆ?',
+    companionPresenceHint: 'ಆರೋಗ್ಯ ವಿಚಾರಿಸಲು ಅಥವಾ ಮಾತನಾಡಲು ಯಾವುದೇ ಸಮಯದಲ್ಲಿ ಟ್ಯಾಪ್ ಮಾಡಿ',
+    companionIdleBubble: 'ನಿಮ್ಮ ಆರೋಗ್ಯ, ಔಷಧಿ ಅಥವಾ ಯೋಗಕ್ಷೇಮದ ಬಗ್ಗೆ ನನ್ನೊಂದಿಗೆ ನಿರಾಳವಾಗಿ ಮಾತನಾಡಿ.',
+    companionYouSaid: 'ನೀವು ಹೇಳಿದ್ದು:',
+    companionReplayBtn: '🔊 ಧ್ವನಿ ಮರುಪ್ಲೇ',
+
+    // Family Glance Card
+    familyGlanceTitle: 'ಕುಟುಂಬದ ಸಂದೇಶ',
+    familyGlanceSender: 'ಪ್ರಿಯಾ (ಮಗಳು)',
+    familyGlanceTime: '೧೦ ನಿಮಿಷಗಳ ಹಿಂದೆ',
+    familyGlanceNote: 'ತಿಂಡಿ ತಿಂದಿರಾ ಅಮ್ಮಾ? ಮಧ್ಯಾಹ್ನದ ಔಷಧಿ ಮರೆಯಬೇಡಿ, ಸಂಜೆ ಭೇಟಿಯಾಗುತ್ತೇನೆ! ❤️',
+    familyQuickReply: '❤️ "ನಾನು ಕ್ಷೇಮವಾಗಿದ್ದೇನೆ" ಎಂದು ಕಳುಹಿಸಿ',
+    familyReplySent: '✓ ಪ್ರಿಯಾಗೆ ಉತ್ತರಿಸಲಾಗಿದೆ',
+
+    // Primary SOS Tile
+    sosBadge: 'ತುರ್ತು ಸಹಾಯ • ೧೧೨',
+    sosBtnLabel: 'ನನಗೆ ಸಹಾಯ ಬೇಕು',
+    sosBtnSub: '೧೧೨ ಮತ್ತು ಕುಟುಂಬಕ್ಕೆ ತಕ್ಷಣ ಎಚ್ಚರಿಕೆ',
+    sosBtnActiveLabel: 'ಸಹಾಯ ಕೋರಲಾಗಿದೆ',
+    sosBtnActiveSub: '೧೧೨ ಮತ್ತು ಕುಟುಂಬಕ್ಕೆ ಎಚ್ಚರಿಸಲಾಗಿದೆ • ಸಹಾಯ ಬರುತ್ತಿದೆ',
+
+    // 3 Major Action Buttons
+    callFamilyBadge: 'ಕುಟುಂಬ ಸಂಪರ್ಕ',
+    callFamilyBtn: 'ಪ್ರಿಯಾಗೆ ಕರೆ',
+    callFamilySub: 'ಪ್ರಿಯಾ (ಮಗಳು) • ತಕ್ಷಣದ ಫೋನ್ ಕರೆ',
+    callFamilyStatus: 'ಪ್ರಿಯಾಗೆ ಕರೆ ಮಾಡಲಾಗುತ್ತಿದೆ...',
+
+    // Daily Mood / Rhythm Row
+    moodRowTitle: 'ಇಂದಿನ ಕ್ಷೇಮ ಮತ್ತು ಲಯ',
+    moodGood: 'ಉತ್ಸಾಹ',
+    moodCalm: 'ಶಾಂತ',
+    moodResting: 'ವಿಶ್ರಾಂತಿ',
+    moodRecordedToast: 'ಕ್ಷೇಮ ಸ್ಥಿತಿ ಕುಟುಂಬದೊಂದಿಗೆ ಹಂಚಿಕೊಳ್ಳಲಾಗಿದೆ',
+
+    // Voice Intercom Dock
+    voiceBadge: 'ಆರೈಕೆ ಒಡನಾಡಿ',
+    voiceIntercomLabel: 'ನಿಮ್ಮ ಒಡನಾಡಿಯೊಂದಿಗೆ ಮುಕ್ತವಾಗಿ ಮಾತನಾಡಿ',
+    voiceIntercomSub: 'ಆರೋಗ್ಯ ಪ್ರಶ್ನೆಗಳು, ರೋಗಲಕ್ಷಣಗಳು ಅಥವಾ ಸಾಮಾನ್ಯ ಹರಟೆ',
+    talkBtnTapToSpeak: 'ನನ್ನೊಂದಿಗೆ ಮಾತನಾಡಲು ಟ್ಯಾಪ್ ಮಾಡಿ',
+    talkBtnListening: 'ಆಲಿಸಲಾಗುತ್ತಿದೆ...',
+    talkBtnSpeakNow: 'ಸ್ಪಷ್ಟವಾಗಿ ಮಾತನಾಡಿ',
+
+    // Medication Tracker
+    medTrackerTitle: 'ಔಷಧಿ ವೇಳಾಪಟ್ಟಿ',
+    medTakenBadge: 'ತೆಗೆದುಕೊಂಡಾಗಿದೆ',
+    medDueBadge: 'ಈಗ ತೆಗೆದುಕೊಳ್ಳಿ',
+    medMarkTakenBtn: '✓ ತೆಗೆದುಕೊಂಡಿದ್ದೇನೆ',
+
+    // Fall & Vision Perception Translations
+    fallAlertTitle: 'ನೀವು ಕೆಳಗೆ ಬಿದ್ದಿದ್ದೀರಾ?',
+    fallAlertPrompt: 'ಕೋಣೆಯಲ್ಲಿ ಹಠಾತ್ ಕುಸಿತ ಅಥವಾ ಭಂಗಿಯ ಏರುಪೇರು ಪತ್ತೆಯಾಗಿದೆ. ನೀವು ಕ್ಷೇಮವಾಗಿದ್ದೀರಾ?',
+    fallVoiceCheck: 'ಕಮಲಾ ಅವರೇ, ಬಿದ್ದಿದ್ದೀರಾ? ನಿಮಗೆ ಆರಾಮವಿದೆಯೇ? ದಯವಿಟ್ಟು ಮಾತನಾಡಿ ಅಥವಾ ಬಟನ್ ಒತ್ತಿ.',
+    emotionSadPrompt: 'ನೀವು ಬೇಸರ ಅಥವಾ ಆತಂಕದಲ್ಲಿದ್ದಂತೆ ತೋರುತ್ತಿದೆ. ನಾನು ನಿಮ್ಮೊಂದಿಗೆ ಇದ್ದೇನೆ, ಏನಾದರೂ ಸಹಾಯ ಬೇಕೇ?',
+    emotionFearPrompt: 'ಚಿಂತಿಸಬೇಡಿ, ನೀವು ಸುರಕ್ಷಿತವಾಗಿದ್ದೀರಿ. ನಾನು ಇಲ್ಲೇ ನಿಮ್ಮೊಂದಿಗೆ ಇದ್ದೇನೆ.',
+    inactivityPrompt: 'ಕಮಲಾ ಅವರೇ, ನೀವು ಆರಾಮವಾಗಿ ವಿಶ್ರಾಂತಿ ಪಡೆಯುತ್ತಿದ್ದೀರಾ ಎಂದು ಪರಿಶೀಲಿಸುತ್ತಿದ್ದೇನೆ.',
+
+    // Escalation Mode Translations
+    alertTitle: 'ನೀವು ಬಿದ್ದಿದ್ದೀರಾ? ಕ್ಷೇಮವಾಗಿದ್ದೀರಾ?',
+    alertSub: 'ಕಮಲಾ ಅವರೇ, ನೀವು ಬಿದ್ದಿದ್ದೀರಾ? ನಿಮಗೆ ಆರಾಮವಿದೆಯೇ? ದಯವಿಟ್ಟು ಖಚಿತಪಡಿಸಿ.',
+    yesImFineBtn: 'ನಾನು ಕ್ಷೇಮವಾಗಿದ್ದೇನೆ — ಟೈಮರ್ ನಿಲ್ಲಿಸಿ',
+    yesImFineSub: 'ಎಚ್ಚರಿಕೆ ರದ್ದುಮಾಡಿ ಮತ್ತು ಸಾಮಾನ್ಯ ಸ್ಥಿತಿಗೆ ಮರಳಿ',
+    fineConfirmationTts: 'ನೀವು ಸುರಕ್ಷಿತವಾಗಿರುವುದು ಸಂತೋಷ ತಂದಿದೆ. ಎಚ್ಚರಿಕೆ ರದ್ದುಗೊಂಡಿದೆ.',
+    escalationWarning: 'ಯಾವುದೇ ಪ್ರತಿಕ್ರಿಯೆ ಇಲ್ಲದಿದ್ದರೆ ಕುಟುಂಬ ಮತ್ತು ೧೧೨ ಕ್ಕೆ ಎಚ್ಚರಿಕೆ ರವಾನೆಯಾಗುತ್ತದೆ',
+
+    // Escalation Tiers
+    tier1: 'ಹಂತ ೧: ಧ್ವನಿ ವಿಚಾರಣೆ',
+    tier2: 'ಹಂತ ೨: ಆರೈಕೆದಾರರ ಫೋನ್ & ತುರ್ತು ಮುನ್ಸೂಚನೆ',
+    tier3: 'ಹಂತ ೩: ತುರ್ತು ರವಾನೆ & ೧೧೨ ಸಂಪರ್ಕ',
+    secondsShort: 'ಸೆ',
+
+    // Alert Actions & Subtexts
+    streamingAudioSub: 'ಧ್ವನಿ ಆಡಿಯೋ ಲೈವ್ ಪ್ಲೇ ಆಗುತ್ತಿದೆ',
+    speakToExplainSub: 'ನಿಮ್ಮ ಪರಿಸ್ಥಿತಿಯನ್ನು ವಿವರಿಸಿ',
+    sosEmergencyBadge: '(೧೧೨ ತುರ್ತು)',
+
+    // Voice & Telemetry
+    telemetryHubLabel: 'ಹಬ್ ಲಿಂಕ್:',
+    telemetryHubConnected: 'ಸಂಪರ್ಕಿತ',
+    telemetryHubReconnecting: 'ಮರುಸಂಪರ್ಕ...',
+    telemetryVoiceLabel: 'ಧ್ವನಿ:',
+    telemetryVoiceReady: 'ಸಿದ್ಧ',
+    telemetryVoiceListening: 'ಆಲಿಸುತ್ತಿದೆ',
+    telemetryVoiceSpeaking: 'ಮಾತನಾಡುತ್ತಿದೆ',
+    toolVisionSim: '👁️ ವಿಷನ್ ಸಿಮ್ಯುಲೇಶನ್',
+    toolCheckIns: '📋 ಆರೋಗ್ಯ ಪರಿಶೀಲನೆ',
+    toolSteadiness: '🚶 ಸ್ಥಿರತೆ ಪರಿಶೀಲನೆ',
+
+    // Voice States
+    voiceStateListening: '● ಆಲಿಸುತ್ತಿದೆ',
+    voiceStateSpeaking: '● ಮಾತನಾಡುತ್ತಿದೆ',
+    voiceStateReady: '● ಸಿದ್ಧ',
+    liveSpeechStream: 'ಲೈವ್ ಭಾಷಣ ಸ್ಟ್ರೀಮ್:',
+    dialFamilyPill: 'ಕರೆ ಮಾಡಿ 📞',
+    voiceIssueHeadline: 'ಧ್ವನಿ ಸಮಸ್ಯೆ — ಮರುಪ್ರಯತ್ನಿಸಿ',
+    voiceIssueDetail: 'ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿ ಪರಿಶೀಲಿಸಿ',
+
+    // Drawers
+    drawerVisionTitle: '👁️ ಶಾಸ್ತ್ರ ವಿಷನ್ ಪ್ರಚೋದಕಗಳು:',
+    drawerTriggerFall: '💥 ಬಿದ್ದಿರುವುದು ಪತ್ತೆ',
+    drawerTriggerSad: '😢 ಆತಂಕ ಪತ್ತೆ (ಬೇಸರ)',
+    drawerTriggerFear: '😨 ಆತಂಕ ಪತ್ತೆ (ಭಯ)',
+    drawerTriggerInactivity: '🛑 ನಿಶ್ಚಲತೆ ಪತ್ತೆ',
+    drawerCheckInTitle: '📋 ಆರೋಗ್ಯ ಪರಿಶೀಲನೆಗಳು:',
+    drawerCognitive: '🧠 ನೆನಪಿನ ಶಕ್ತಿ ಪರಿಶೀಲನೆ',
+    drawerBreakfast: '🥣 ಉಪಾಹಾರ',
+    drawerLunch: '🍲 ಊಟ',
+    drawerSleep: '🌙 ನಿದ್ರೆ ಗುಣಮಟ್ಟ',
+    drawerMobility: '🚶 ನಡಿಗೆ ಸ್ಥಿರತೆ',
+  },
 };
 
 /**
@@ -166,7 +295,18 @@ function buildSensorEvent({
 }
 
 export default function ElderScreen() {
-  const { isConnected, lastMessage, sendMessage } = useWebSocket();
+  const classifyAndDispatchRef = useRef(null);
+  const handleIncomingWsMessage = useCallback((data) => {
+    if (classifyAndDispatchRef.current) {
+      try {
+        classifyAndDispatchRef.current(data);
+      } catch (err) {
+        console.warn('classifyAndDispatch error:', err);
+      }
+    }
+  }, []);
+
+  const { isConnected, lastMessage, sendMessage } = useWebSocket(handleIncomingWsMessage);
   const {
     speakThenListen,
     speak,
@@ -176,22 +316,58 @@ export default function ElderScreen() {
     isSpeaking,
     isListening,
     error: voiceError,
+    clearError,
     secondsLeft,
     interimText,
   } = useVoiceHandler();
+
+  const lastSpokenAiDecisionIdRef = useRef(null);
+  const lastReceivedAiDecisionTimeRef = useRef(0);
+
+  // Auto-clear voice error after 3.5s so screen never remains permanently locked in error state
+  useEffect(() => {
+    if (!voiceError) return;
+    const timer = setTimeout(() => {
+      if (clearError) clearError();
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, [voiceError, clearError]);
 
   const [sosSent, setSosSent] = useState(false);
   const [selectedMood, setSelectedMood] = useState(null);
   const [moodToast, setMoodToast] = useState(null);
   const [familyReplied, setFamilyReplied] = useState(false);
-  const [familyVoiceReplyActive, setFamilyVoiceReplyActive] = useState(false);
+  const [customStatusText, setCustomStatusText] = useState('');
+  const [lastSentStatus, setLastSentStatus] = useState(null);
+  const [isSendingStatus, setIsSendingStatus] = useState(false);
+  const statusInputRef = useRef(null);
   const [lastSpokenText, setLastSpokenText] = useState(null);
   const [selectedLang] = useState('en-IN');
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showCheckInMenu, setShowCheckInMenu] = useState(false);
   const [showVisionMenu, setShowVisionMenu] = useState(false);
-  const [showMedDrawer, setShowMedDrawer] = useState(false);
+  const [showMedFab, setShowMedFab] = useState(false);
+  const [newMedName, setNewMedName] = useState('');
   const [showFamilySimMenu, setShowFamilySimMenu] = useState(false);
+  const [activeTab, setActiveTab] = useState('home'); // 'home' | 'profile'
+
+  // Dynamic Elder Profile State (loaded from localStorage)
+  const [elderProfile, setElderProfile] = useState(() => {
+    try {
+      const saved = localStorage.getItem('shastra_elder_profile_data');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return { name: 'Kamala Devi', age: 72, gender: 'Female' };
+  });
+
+  // Caregiver contact is permanently locked to Priya (Daughter)
+  const familyContactName = 'Priya (Daughter)';
+
+  useEffect(() => {
+    try {
+      localStorage.removeItem('shastra_family_contact_name');
+    } catch (e) {}
+  }, []);
 
   // Default Idle Family Message
   const DEFAULT_FAMILY_MESSAGE = {
@@ -230,45 +406,11 @@ export default function ElderScreen() {
   const [familyAck, setFamilyAck] = useState(null); // { acknowledgedBy: string, message: string, timestamp: number }
   const [aiAgentStatus, setAiAgentStatus] = useState(null); // { action: string, message: string, reasoning: string }
 
-  // Scheduled Medications State
+  // Dynamic Medications State (elder-managed)
   const [medications, setMedications] = useState([
-    {
-      id: 'med_bp',
-      name: 'Amlodipine 5mg (BP)',
-      nameKn: 'ರಕ್ತದೊತ್ತಡದ ಮಾತ್ರೆ (BP)',
-      nameHi: 'ब्लड प्रेशर की दवा (BP)',
-      timeSlot: 'Morning 8:00 AM',
-      timeSlotKn: 'ಬೆಳಗ್ಗೆ ೮:೦೦',
-      timeSlotHi: 'सुबह ८:००',
-      icon: '🌅',
-      taken: true,
-      timeTaken: '8:15 AM',
-      dueNow: false,
-    },
-    {
-      id: 'med_calcium',
-      name: 'Calcium + Vit D3',
-      nameKn: 'ಕ್ಯಾಲ್ಸಿಯಂ & ವಿಟಮಿನ್ ಡಿ',
-      nameHi: 'कैल्शियम & विटामिन डी',
-      timeSlot: 'Afternoon 1:30 PM',
-      timeSlotKn: 'ಮಧ್ಯಾಹ್ನ ೧:೩೦',
-      timeSlotHi: 'दोपहर १:३०',
-      icon: '☀️',
-      taken: false,
-      dueNow: true,
-    },
-    {
-      id: 'med_sugar',
-      name: 'Metformin 500mg',
-      nameKn: 'ಸಕ್ಕರೆ ಕಾಯಿಲೆ ಮಾತ್ರೆ (Sugar)',
-      nameHi: 'शुगर की दवा (Sugar)',
-      timeSlot: 'Night 8:30 PM',
-      timeSlotKn: 'ರಾತ್ರಿ ೮:೩೦',
-      timeSlotHi: 'रात ८:३०',
-      icon: '🌙',
-      taken: false,
-      dueNow: false,
-    },
+    { id: 'med_bp', name: 'Amlodipine 5mg (BP)', emoji: '💊', status: 'pending' },
+    { id: 'med_calcium', name: 'Calcium + Vit D3', emoji: '💊', status: 'pending' },
+    { id: 'med_sugar', name: 'Metformin 500mg', emoji: '💊', status: 'pending' },
   ]);
 
   // Fall Emergency Modal State
@@ -285,7 +427,31 @@ export default function ElderScreen() {
   const [escalationTierKey, setEscalationTierKey] = useState('tier1');
   const [escalationSecondsLeft, setEscalationSecondsLeft] = useState(15);
 
-  const t = I18N['en-IN'];
+  // Dynamically personalize text with active elder identity (memoized to prevent re-render loops)
+  const elderFirstName = elderProfile?.name?.split(' ')[0] || 'Kamala';
+  const t = useMemo(() => ({
+    ...I18N['en-IN'],
+    calmStatus: `${elderFirstName} is Safe & Comfortable`,
+    companionGreeting: `Hello, ${elderFirstName}`,
+    familyGlanceSender: 'Priya (Daughter)',
+    familyReplySent: '✓ Quick reply sent to Priya',
+  }), [elderFirstName]);
+
+  // Live Announcement Handshake: Broadcast once on initial WebSocket connection
+  const hasAnnouncedRef = useRef(false);
+  useEffect(() => {
+    if (isConnected && !hasAnnouncedRef.current && elderProfile) {
+      hasAnnouncedRef.current = true;
+      sendMessage({
+        type: 'profile_update',
+        elder_id: ELDER_ID,
+        profile: elderProfile,
+        timestamp: new Date().toISOString(),
+      });
+    } else if (!isConnected) {
+      hasAnnouncedRef.current = false;
+    }
+  }, [isConnected]);
 
   // Concurrency & Debounce Guards
   const processedDecisionsRef = useRef(new Set());
@@ -349,9 +515,18 @@ export default function ElderScreen() {
   }, [backendAlertActive]);
 
   /**
-   * Reset the active backend emergency/escalation mode.
-   * Sets a cooldown timestamp so the polling loop won't immediately re-trigger.
+   * Empathetic Fall Emergency Trigger:
+   * Displays compassionate "Did you fall? Are you fine?" prompt and speaks to senior.
    */
+  const triggerFallAlert = useCallback((customReason) => {
+    const name = elderProfile?.name?.split(' ')[0] || 'Kamala';
+    const empatheticPrompt = `${name}, did you fall? Are you fine? Please confirm if you are okay.`;
+    setFallReason(customReason || empatheticPrompt);
+    setFallModalOpen(true);
+    playEmergencyAlarm();
+    speak(empatheticPrompt, selectedLang);
+  }, [elderProfile, selectedLang, speak]);
+
   /**
    * Reset the active backend emergency/escalation mode.
    * Sets a cooldown timestamp so the polling loop won't immediately re-trigger.
@@ -411,7 +586,8 @@ export default function ElderScreen() {
 
     const eventId = crypto.randomUUID ? crypto.randomUUID() : `evt_${Date.now()}`;
     const decId = `dec_${Date.now()}`;
-    const alertMsg = '🚨 CRITICAL EMERGENCY: Kamala Devi pressed SOS Button on tablet!';
+    const elderName = elderProfile?.name || 'Kamala Devi';
+    const alertMsg = `🚨 CRITICAL EMERGENCY: ${elderName} pressed SOS Button on tablet!`;
 
     // Register in dedup set so own decision does not loop back to open questionnaire
     processedDecisionsRef.current.add(decId);
@@ -430,7 +606,7 @@ export default function ElderScreen() {
       decision_id: decId,
       message: alertMsg,
       severity: 'critical',
-      reasoning_trace: 'Elder Kamala Devi pressed manual SOS button on tablet interface.',
+      reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
       timestamp: new Date().toISOString(),
     });
 
@@ -440,7 +616,7 @@ export default function ElderScreen() {
       event_id: eventId,
       severity: 'critical',
       action: 'call_emergency',
-      reasoning_trace: 'Elder Kamala Devi pressed manual SOS button on tablet interface.',
+      reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
       voice_message_to_elder: 'Emergency services and your family have been notified.',
       language_code: 'en-IN',
       family_message: alertMsg,
@@ -466,7 +642,7 @@ export default function ElderScreen() {
           event_id: eventId,
           severity: 'critical',
           action: 'call_emergency',
-          reasoning_trace: 'Elder Kamala Devi pressed manual SOS button on tablet interface.',
+          reasoning_trace: `Elder ${elderName} pressed manual SOS button on tablet interface.`,
           voice_message_to_elder: 'Emergency services and your family have been notified.',
           language_code: 'en-IN',
           family_message: alertMsg,
@@ -475,7 +651,7 @@ export default function ElderScreen() {
     } catch (e) {
       console.warn('Failed to post SOS to Hub:', e);
     }
-  }, [sendMessage]);
+  }, [sendMessage, elderProfile]);
 
   /**
    * Cancel Emergency SOS / Confirm Safe
@@ -486,10 +662,12 @@ export default function ElderScreen() {
     playSuccessChime();
     speak('Emergency alert cancelled. You are safe.', selectedLang);
 
+    const elderName = elderProfile?.name || 'Kamala';
     sendMessage({
       type: 'emergency_cancelled',
-      elder_id: 'kamala_001',
-      message: 'Kamala confirmed she is safe. Alert cancelled.',
+      elder_id: ELDER_ID,
+      elder_name: elderName,
+      message: `${elderName} confirmed safe. Alert cancelled.`,
       timestamp: new Date().toISOString(),
     });
 
@@ -533,86 +711,81 @@ export default function ElderScreen() {
   }, [t, sendMessage]);
 
   /**
-   * Family Glance Quick Reply: Instant message to Priya / Family Dashboard
+   * Quick Status Presets for Elder Convenience
    */
-  const handleFamilyReply = useCallback(async () => {
-    setFamilyReplied(true);
+  const STATUS_PRESETS = useMemo(() => [
+    { emoji: '❤️', text: "I'm Doing Well" },
+    { emoji: '🍵', text: 'Having Morning Tea' },
+    { emoji: '🛏️', text: 'Resting Comfortably' },
+    { emoji: '☀️', text: 'Feeling Great' },
+    { emoji: '💊', text: 'Took All Medicines' },
+  ], []);
+
+  /**
+   * Custom Status Update: Broadcasts custom written status message to Family Dashboard and Hub
+   */
+  const handleSendCustomStatus = useCallback(async (explicitText) => {
+    const rawText = typeof explicitText === 'string' ? explicitText : customStatusText;
+    const textToSend = rawText?.trim();
+    if (!textToSend || isSendingStatus) return;
+
+    setIsSendingStatus(true);
     playSuccessChime();
 
-    const replyText = 'Amma replied: Doing well, love you too! ❤️';
+    const elderName = elderProfile?.name || 'Kamala';
+    const finalFormattedMessage = `${elderName}: ${textToSend}`;
 
-    // Broadcast live over WebSocket to Family Dashboard
+    // 1. Broadcast over WebSocket to Family Dashboard (both family_reply & elder_status events)
     sendMessage({
       type: 'family_reply',
       elder_id: ELDER_ID,
-      sender: 'Kamala (Elder)',
-      message: replyText,
+      sender: `${elderName} (Elder)`,
+      message: finalFormattedMessage,
+      status_text: textToSend,
       timestamp: new Date().toISOString(),
     });
 
+    sendMessage({
+      type: 'elder_status',
+      elder_id: ELDER_ID,
+      sender: `${elderName} (Elder)`,
+      message: finalFormattedMessage,
+      status: textToSend,
+      timestamp: new Date().toISOString(),
+    });
+
+    // 2. Post sensor event to Hub REST API
     const payload = buildSensorEvent({
       eventType: 'voice_input',
-      voiceTranscript: replyText,
+      voiceTranscript: `Elder Status: "${textToSend}"`,
       confidence: 1.0,
     });
 
     try {
       await postSensorEvent(payload);
-      setTimeout(() => setFamilyReplied(false), 5000);
     } catch (e) {
-      console.warn('Failed to post family reply:', e);
+      console.warn('Failed to post custom status event to Hub:', e);
+    } finally {
+      setIsSendingStatus(false);
+      setLastSentStatus(textToSend);
+      setCustomStatusText('');
+      setFamilyReplied(true);
+
+      if (familyMessageResetTimerRef.current) {
+        clearTimeout(familyMessageResetTimerRef.current);
+      }
+      familyMessageResetTimerRef.current = setTimeout(() => {
+        setFamilyReplied(false);
+      }, 7000);
     }
-  }, [sendMessage]);
+  }, [customStatusText, isSendingStatus, elderProfile, sendMessage]);
 
-  /**
-   * Dedicated Voice Note to Family: Records audio for 5 seconds and sends transcript directly to Family Dashboard
-   */
-  const handleVoiceReplyToFamily = useCallback(() => {
-    if (isListening) {
-      finishListening();
-      setFamilyVoiceReplyActive(false);
-      return;
+  const handleSelectPreset = useCallback((presetText) => {
+    setCustomStatusText(presetText);
+    if (statusInputRef.current) {
+      statusInputRef.current.focus();
     }
-
-    stop();
-    setFamilyVoiceReplyActive(true);
-
-    listen({
-      language: selectedLang,
-      duration: 5,
-      onTranscript: async (transcript) => {
-        setFamilyVoiceReplyActive(false);
-        if (!transcript) return;
-        playSuccessChime();
-        speak('Your voice note was sent to Priya.', selectedLang);
-
-        // Broadcast to Family Dashboard via WebSocket
-        sendMessage({
-          type: 'family_reply',
-          elder_id: 'kamala_001',
-          sender: 'Kamala (Elder)',
-          message: transcript,
-          category: 'voice_message',
-          timestamp: new Date().toISOString(),
-        });
-
-        const payload = buildSensorEvent({
-          eventType: 'voice_input',
-          confidence: 1.0,
-          voiceTranscript: `Voice Note from Kamala: "${transcript}"`,
-          sender: 'Kamala (Elder)',
-        });
-
-        try {
-          await postSensorEvent(payload);
-          setFamilyReplied(true);
-          setTimeout(() => setFamilyReplied(false), 5000);
-        } catch (e) {
-          console.warn('Failed to post voice reply to family:', e);
-        }
-      },
-    });
-  }, [isListening, finishListening, stop, listen, selectedLang, speak, sendMessage]);
+  }, []);
 
   /**
    * Answer Incoming Call from Family Dashboard (Teammate 4 Schema E CallResponse)
@@ -713,39 +886,38 @@ export default function ElderScreen() {
   }, [incomingCall, sendMessage]);
 
   /**
-   * Silent Medication Toggle
+   * Toggle Medication Status (pending ↔ done) & Sync to Family Dashboard
    */
   const handleToggleMedication = useCallback(async (medId) => {
-    let nextTaken = false;
-    setMedications((prev) =>
-      prev.map((m) => {
+    let nextStatus = 'done';
+    let medName = '';
+    setMedications((prev) => {
+      const updated = prev.map((m) => {
         if (m.id === medId) {
-          nextTaken = !m.taken;
-          return {
-            ...m,
-            taken: nextTaken,
-            dueNow: false,
-            timeTaken: nextTaken ? new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null,
-          };
+          nextStatus = m.status === 'pending' ? 'done' : 'pending';
+          medName = m.name;
+          return { ...m, status: nextStatus };
         }
         return m;
-      })
-    );
+      });
 
-    // Broadcast medication status to Family Dashboard
-    sendMessage({
-      type: 'medication_update',
-      elder_id: ELDER_ID,
-      med_id: medId,
-      taken: nextTaken,
-      timestamp: new Date().toISOString(),
+      // Broadcast FULL medication list to Family Dashboard via WebSocket
+      sendMessage({
+        type: 'medication_update',
+        elder_id: ELDER_ID,
+        medications: updated.map(({ id, name, emoji, status }) => ({ id, name, emoji, status })),
+        timestamp: new Date().toISOString(),
+      });
+
+      return updated;
     });
 
+    // Also fire a REST SensorEvent using existing voice_input type
     try {
       const payload = buildSensorEvent({
-        eventType: 'medication_missed',
+        eventType: 'voice_input',
         confidence: 1.0,
-        voiceTranscript: `Medication dose ${medId} marked ${nextTaken ? 'taken' : 'untaken'} by elder`,
+        voiceTranscript: `Medication ${medName || medId} marked ${nextStatus} by elder`,
       });
       await postSensorEvent(payload);
     } catch (e) {
@@ -754,19 +926,95 @@ export default function ElderScreen() {
   }, [sendMessage]);
 
   /**
+   * Add New Medicine (elder-managed) & Sync to Family Dashboard
+   */
+  const handleAddMedicine = useCallback(async (name) => {
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+    const newMed = {
+      id: `med_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      name: trimmed,
+      emoji: '💊',
+      status: 'pending',
+    };
+
+    setMedications((prev) => {
+      const updated = [...prev, newMed];
+
+      // Broadcast FULL medication list to Family Dashboard via WebSocket
+      sendMessage({
+        type: 'medication_update',
+        elder_id: ELDER_ID,
+        medications: updated.map(({ id, name, emoji, status }) => ({ id, name, emoji, status })),
+        timestamp: new Date().toISOString(),
+      });
+
+      return updated;
+    });
+
+    // Fire REST SensorEvent using existing voice_input type
+    try {
+      const payload = buildSensorEvent({
+        eventType: 'voice_input',
+        confidence: 1.0,
+        voiceTranscript: `Elder added new medication: ${trimmed}`,
+      });
+      await postSensorEvent(payload);
+    } catch (e) {
+      console.warn('Failed to send new medication event to Hub:', e);
+    }
+  }, [sendMessage]);
+
+  /**
+   * Handle dynamic profile updates from ElderProfileView
+   * Dispatches via WebSocket profile_update and Schema A voice_input
+   */
+  const handleProfileUpdate = useCallback(async (updatedProfile) => {
+    if (!updatedProfile) return;
+    setElderProfile(updatedProfile);
+
+    // 1. Post to backend as a low-severity monitor decision so Hub broadcasts it to all clients on /ws/alerts
+    try {
+      await postDecision({
+        type: 'AgentDecision',
+        decision_id: `prof_${Date.now()}`,
+        event_id: `prof_evt_${Date.now()}`,
+        severity: 'low',
+        action: 'monitor',
+        reasoning_trace: `Elder ${updatedProfile.name} profile sync`,
+        voice_message_to_elder: '',
+        language_code: 'en-IN',
+        family_message: `PROFILE_SYNC:${JSON.stringify(updatedProfile)}`,
+      });
+    } catch (e) {
+      console.warn('Failed to post profile decision to Hub:', e);
+    }
+
+    // 2. Direct WebSocket frame
+    sendMessage({
+      type: 'profile_update',
+      elder_id: ELDER_ID,
+      profile: updatedProfile,
+      timestamp: new Date().toISOString(),
+    });
+  }, [sendMessage]);
+
+  /**
    * Direct Family Phone Call Trigger (Major Button 3)
    * Opens dedicated Outgoing Call modal and notifies Family Dashboard via CallInvite.
    */
   const handleDirectFamilyCall = useCallback(async () => {
     const familyPhone = '+919876543210';
-    const confirmationMsg = t.callFamilyStatus || 'Calling Priya directly...';
+    const elderName = elderProfile?.name || 'Kamala Devi';
+    const targetName = 'Priya (Daughter)';
+    const confirmationMsg = 'Calling Priya directly...';
 
     playGentleChime();
     speak(confirmationMsg, selectedLang);
 
     // 1. Open dedicated Outgoing Call modal on tablet screen
     setOutgoingCall({
-      target: 'Priya (Daughter)',
+      target: targetName,
       phone: familyPhone,
       startTime: Date.now(),
     });
@@ -774,7 +1022,7 @@ export default function ElderScreen() {
     const callId = `call_${Date.now()}`;
     const callDecId = `dec_${Date.now()}`;
     const callEvtId = `evt_${Date.now()}`;
-    const callMsg = '📞 INCOMING CALL: Kamala Devi (Mother) is calling you! Tap to connect.';
+    const callMsg = `📞 INCOMING CALL: ${elderName} is calling you! Tap to connect.`;
 
     // Register in dedup set so own call decision doesn't loop back to elder
     processedDecisionsRef.current.add(callDecId);
@@ -787,7 +1035,7 @@ export default function ElderScreen() {
       decision_id: callDecId,
       message: callMsg,
       severity: 'high',
-      reasoning_trace: 'Kamala Devi initiated a live phone call to Priya.',
+      reasoning_trace: `${elderName} initiated a live phone call to ${targetName}.`,
       timestamp: new Date().toISOString(),
     });
 
@@ -797,8 +1045,8 @@ export default function ElderScreen() {
       event_id: callEvtId,
       severity: 'high',
       action: 'notify_family',
-      reasoning_trace: 'Kamala Devi initiated a live phone call to Priya.',
-      voice_message_to_elder: 'Calling Priya.',
+      reasoning_trace: `${elderName} initiated a live phone call to ${targetName}.`,
+      voice_message_to_elder: `Calling ${targetName.split(' ')[0]}.`,
       language_code: 'en-IN',
       family_message: callMsg,
       timestamp: new Date().toISOString(),
@@ -808,29 +1056,28 @@ export default function ElderScreen() {
     sendMessage({
       type: 'CallInvite',
       call_id: callId,
-      elder_id: 'kamala_001',
-      caller_name: 'Kamala Devi (Mother)',
+      elder_id: ELDER_ID,
+      caller_name: `${elderName} (Elder)`,
       call_type: 'voice',
       timestamp: new Date().toISOString(),
     });
 
     sendMessage({
       type: 'elder_call_initiated',
-      elder_id: 'kamala_001',
-      target: 'Priya (Daughter)',
+      elder_id: ELDER_ID,
+      target: targetName,
       phone: familyPhone,
       timestamp: new Date().toISOString(),
     });
 
-    // 4. Post to Hub REST API:
-    // Calling postDecision causes FastAPI Hub to broadcast FamilyAlert to ALL connected WebSocket clients!
+    // 4. Post to Hub REST API
     try {
       await Promise.allSettled([
         postSensorEvent(
           buildSensorEvent({
             eventType: 'normal',
             confidence: 1.0,
-            voiceTranscript: 'Elder initiated phone call to family (Priya)',
+            voiceTranscript: `Elder ${elderName} initiated phone call to ${targetName}`,
             eventId: callEvtId,
           })
         ),
@@ -840,8 +1087,8 @@ export default function ElderScreen() {
           event_id: callEvtId,
           severity: 'high',
           action: 'notify_family',
-          reasoning_trace: 'Kamala Devi initiated a live phone call to Priya.',
-          voice_message_to_elder: 'Calling Priya.',
+          reasoning_trace: `${elderName} initiated a live phone call to ${targetName}.`,
+          voice_message_to_elder: `Calling ${targetName.split(' ')[0]}.`,
           language_code: 'en-IN',
           family_message: callMsg,
         }),
@@ -849,7 +1096,7 @@ export default function ElderScreen() {
     } catch (e) {
       console.warn('Failed to post direct family call event/decision:', e);
     }
-  }, [selectedLang, t, speak, sendMessage]);
+  }, [elderProfile, familyContactName, selectedLang, speak, sendMessage]);
 
   /**
    * End Outgoing Call Handler
@@ -884,13 +1131,13 @@ export default function ElderScreen() {
 
     listen({
       language: selectedLang,
-      duration: 5,
+      duration: 6,
       onTranscript: async (transcript) => {
         if (!transcript) return;
         setLastSpokenText(transcript);
         playSuccessChime();
 
-        // Check for vocal cancellation
+        // 1. Check for vocal cancellation
         const lower = transcript.toLowerCase();
         if (
           lower.includes('fine') ||
@@ -902,18 +1149,16 @@ export default function ElderScreen() {
           return;
         }
 
-        // Spoken audio feedback confirming receipt
-        const audioConfirmation = 'I heard you clearly. Your message has been sent to your family.';
-        speak(audioConfirmation, selectedLang);
-
-        // Broadcast to Family Dashboard & AI Agent
-        sendMessage({
-          type: 'elder_voice',
-          elder_id: 'kamala_001',
-          transcript: transcript,
-          timestamp: new Date().toISOString(),
+        // 2. Set UI indicator: waiting for hosted LLM agent
+        setAiAgentStatus({
+          action: 'voice_check',
+          message: '⏳ Consulting Hosted LLM Agent...',
+          reasoning: `Voice query "${transcript}" dispatched to Hosted AI Brain.`,
+          severity: 'low',
+          timestamp: Date.now(),
         });
 
+        // 3. Build and post SensorEvent (Schema A) to Hub for Hosted LLM Agent
         const payload = buildSensorEvent({
           eventType: 'voice_input',
           confidence: 1.0,
@@ -921,18 +1166,53 @@ export default function ElderScreen() {
           sender: 'Kamala Devi (Elder)',
         });
 
-        if (payload.event_id) {
-          processedDecisionsRef.current.add(payload.event_id);
-        }
+        // Broadcast elder speech event to Family Dashboard
+        sendMessage({
+          type: 'elder_voice',
+          elder_id: ELDER_ID,
+          transcript: transcript,
+          timestamp: new Date().toISOString(),
+        });
 
         try {
           await postSensorEvent(payload);
+          console.log('✓ Dispatched voice_input to Hub for Hosted LLM Agent:', payload.event_id);
         } catch (e) {
           console.warn('Failed to post voice_input SensorEvent:', e);
         }
+
+        // 4. Fallback guard: If Hosted LLM Agent does not respond within 6.5s, provide local response
+        const dispatchTime = Date.now();
+        setTimeout(async () => {
+          if (lastReceivedAiDecisionTimeRef.current >= dispatchTime) return;
+          console.log('Hosted LLM Agent timeout (6.5s), activating fallback response...');
+          try {
+            const fallbackDecision = await generateCompanionDecision({
+              transcript,
+              elderProfile,
+              medications,
+              recentMood: selectedMood,
+              selectedLang,
+              eventId: payload.event_id,
+            });
+
+            const replyMsg = fallbackDecision?.voice_message_to_elder || 'Hello Kamala ji, I am right here with you.';
+            setAiAgentStatus({
+              action: fallbackDecision?.action || 'voice_check',
+              message: replyMsg,
+              reasoning: fallbackDecision?.reasoning_trace || 'Local fallback assessment.',
+              severity: fallbackDecision?.severity || 'low',
+              timestamp: Date.now(),
+            });
+            playGentleChime();
+            speak(replyMsg, fallbackDecision?.language_code || selectedLang);
+          } catch (err) {
+            console.error('Fallback reasoning error:', err);
+          }
+        }, 6500);
       },
     });
-  }, [isListening, finishListening, stop, listen, selectedLang, handleFallModalSafe, speak, sendMessage]);
+  }, [isListening, finishListening, stop, listen, selectedLang, handleFallModalSafe, speak, sendMessage, elderProfile, medications, selectedMood]);
 
   /**
    * Universal Intelligent Payload Classifier & Router.
@@ -959,10 +1239,10 @@ export default function ElderScreen() {
       }
 
       const rawText = String(
+        payload.family_message ||
         payload.voice_transcript ||
         payload.transcript ||
         payload.voice_message_to_elder ||
-        payload.family_message ||
         payload.message ||
         payload.text ||
         payload.raw ||
@@ -979,11 +1259,15 @@ export default function ElderScreen() {
       const severity = String(payload.severity || '').toLowerCase();
 
       // Deduplication guard
-      const dedupKey =
-        payload.decision_id ||
-        payload.event_id ||
-        payload.alert_id ||
-        `${type}_${action}_${rawText.slice(0, 30)}_${payload.timestamp || ''}`;
+      const dedupKey = payload.decision_id
+        ? `dec_${payload.decision_id}`
+        : payload.alert_id
+        ? `alert_${payload.alert_id}`
+        : payload.call_id
+        ? `call_${payload.call_id}`
+        : (type === 'sensorevent' || eventType === 'voice_input')
+        ? null
+        : `${type}_${action}_${(payload.message || payload.text || rawText).slice(0, 30)}_${payload.timestamp || ''}`;
 
       if (dedupKey && processedDecisionsRef.current.has(dedupKey)) return;
       if (dedupKey) processedDecisionsRef.current.add(dedupKey);
@@ -1025,13 +1309,39 @@ export default function ElderScreen() {
         return;
       }
 
+      // Profile sync handshake and family profile updates
+      if (rawText.startsWith('PROFILE_SYNC:') || payload.family_message?.startsWith('PROFILE_SYNC:')) {
+        return; // Silent: don't speak or alert own profile broadcasts
+      }
+
+      if (type === 'request_profile_sync') {
+        sendMessage({
+          type: 'profile_update',
+          elder_id: ELDER_ID,
+          profile: elderProfile,
+          timestamp: new Date().toISOString(),
+        });
+        return;
+      }
+
+      if (type === 'family_profile_update') {
+        const newFamilyName = payload.sender_name || payload.sender || payload.name;
+        if (newFamilyName) {
+          setFamilyContactName(newFamilyName);
+          try { localStorage.setItem('shastra_family_contact_name', newFamilyName); } catch (e) {}
+          setFamilyMessage((prev) => ({ ...prev, sender: newFamilyName }));
+        }
+        return;
+      }
+
       // Do NOT process self-initiated calls or already handled calls
+      const currentElderName = (elderProfile?.name || 'Kamala Devi').toLowerCase();
       if (
         lowerText.includes('elder initiated phone call') ||
         lowerText.includes('calling priya') ||
-        lowerText.includes('kamala devi is calling') ||
-        lowerText.includes('kamala devi pressed sos') ||
-        payload.caller_name === 'Kamala Devi (Mother)' ||
+        lowerText.includes(`${currentElderName} is calling`) ||
+        lowerText.includes(`${currentElderName} pressed sos`) ||
+        (payload.caller_name && payload.caller_name.toLowerCase().includes(currentElderName)) ||
         (payload.call_id && handledCallsRef.current.has(payload.call_id)) ||
         activeCallRef.current !== null // Cannot receive another call if already connected!
       ) {
@@ -1044,50 +1354,201 @@ export default function ElderScreen() {
       // 1. INCOMING CALL FROM FAMILY DASHBOARD (Schema D CallInvite or call event)
       // Immediately pops up the Incoming Call Screen!
       // =========================================================================
+      const inviteMsg =
+        (typeof payload.family_message === 'string' && payload.family_message.includes('CALL_INVITE'))
+          ? payload.family_message
+          : (typeof rawText === 'string' && rawText.includes('CALL_INVITE'))
+            ? rawText
+            : (typeof payload.message === 'string' && payload.message.includes('CALL_INVITE'))
+              ? payload.message
+              : '';
+
+      const lowerFamilyMsg = String(payload.family_message || '').toLowerCase();
+      const lowerReasoning = String(payload.reasoning_trace || '').toLowerCase();
+      const lowerVoiceMsg = String(payload.voice_message_to_elder || '').toLowerCase();
+      const lowerTranscript = String(payload.voice_transcript || '').toLowerCase();
+
+      // Deep inspection: Was a call initiated by family, even if summarized by backend AI?
+      const isCallKeywordsPresent =
+        Boolean(inviteMsg) ||
+        lowerText.includes('call_invite') ||
+        lowerText.includes('initiated voice call') ||
+        lowerText.includes('initiated video call') ||
+        lowerText.includes('initiated a call') ||
+        lowerText.includes('initiated call') ||
+        lowerText.includes('family initiated call') ||
+        lowerText.includes('family is calling') ||
+        lowerText.includes('priya is calling') ||
+        lowerText.includes('incoming call') ||
+        lowerFamilyMsg.includes('family-initiated call') ||
+        lowerFamilyMsg.includes('initiated a call') ||
+        lowerFamilyMsg.includes('initiated call') ||
+        lowerFamilyMsg.includes('family is calling') ||
+        lowerFamilyMsg.includes('calling kamala') ||
+        lowerReasoning.includes('family member initiated a call') ||
+        lowerReasoning.includes('family-initiated call') ||
+        lowerReasoning.includes('initiated a call') ||
+        lowerReasoning.includes('initiated voice call') ||
+        lowerReasoning.includes('initiated video call') ||
+        lowerReasoning.includes('initiated call') ||
+        lowerVoiceMsg.includes('family called') ||
+        lowerVoiceMsg.includes('see your family called') ||
+        lowerVoiceMsg.includes('family is calling') ||
+        lowerTranscript.includes('initiated voice call') ||
+        lowerTranscript.includes('initiated video call') ||
+        lowerTranscript.includes('initiated call');
+
       const isCallRequest =
+        Boolean(inviteMsg) ||
         type === 'callinvite' ||
         payload.type === 'CallInvite' ||
         ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_request', 'call_elder', 'start_call', 'webrtc_call', 'phone_call'].includes(type) ||
         ['call', 'family_call', 'video_call', 'audio_call', 'incoming_call', 'call_elder', 'start_call', 'call_request'].includes(action) ||
         ['call', 'family_call', 'video_call', 'call_request', 'incoming_call'].includes(eventType) ||
-        lowerText.includes('initiated voice call') ||
-        lowerText.includes('initiated call') ||
-        lowerText.includes('family initiated') ||
-        lowerText.includes('voice call to') ||
-        lowerText.includes('video call to') ||
-        lowerText.includes('family is calling') ||
-        lowerText.includes('priya is calling') ||
-        lowerText.includes('incoming call') ||
-        ((lowerText.includes('call') || lowerText.includes('calling')) &&
-          (lowerText.includes('priya') || lowerText.includes('family') || lowerText.includes('daughter') || lowerText.includes('mother')));
+        isCallKeywordsPresent;
 
       if (isCallRequest) {
-        const callerName = payload.caller || payload.caller_name || payload.sender || 'Priya (Daughter)';
-        // Reject if caller is Kamala herself
-        if (callerName.includes('Kamala')) return;
+        let callerName = 'Priya (Daughter)';
+        let callType = (
+          lowerReasoning.includes('video') ||
+          lowerFamilyMsg.includes('video') ||
+          lowerText.includes('video') ||
+          type.includes('video') ||
+          action.includes('video')
+        ) ? 'video' : 'voice';
+        let callId = payload.call_id || payload.decision_id || `call_${Date.now()}`;
 
-        const callId = payload.call_id || `call_${Date.now()}`;
+        if (inviteMsg) {
+          const parts = inviteMsg.split(':');
+          if (parts[1] && parts[1].toLowerCase().includes('video')) callType = 'video';
+          if (parts[2] && parts[2].trim()) callerName = parts[2].trim();
+          if (parts[3] && parts[3].trim()) callId = parts[3].trim();
+        }
+
         if (handledCallsRef.current.has(callId)) return;
+        handledCallsRef.current.add(callId);
 
-        const callType = (type.includes('video') || action.includes('video') || lowerText.includes('video')) ? 'video' : 'voice';
+        console.log('📞 Triggering Calling Screen Overlay for Call Request:', { callId, callerName, callType });
 
-        // Immediately pop up the Full-Screen Incoming Call Screen!
+        // Immediately pop up the Full-Screen Incoming Calling Screen!
         setIncomingCall({
           call_id: callId,
           elder_id: payload.elder_id || ELDER_ID,
-          caller: callerName,
+          caller: 'Priya (Daughter)',
           callType: callType,
-          message: `${callerName} is calling you live from the Family Dashboard`,
+          message: 'Priya (Daughter) is calling you live from the Family Dashboard',
           timestamp: Date.now(),
         });
 
+        // Ring audio chime only (NO speech prompt, NO AI voice output message)
         playGentleChime();
-        speak(`${callerName} is calling you. Tap green to answer.`, selectedLang);
         return;
       }
 
       // =========================================================================
-      // 2. FAMILY ALERT ACKNOWLEDGMENT / REASSURANCE (Family clicked Acknowledge)
+      // 2. HOSTED AI AGENT DECISION (Teammate 2 AgentDecision / LLM Agent Reply)
+      // Processes voice replies from the hosted brain and speaks to the elder!
+      // =========================================================================
+      const isAiAgentDecision =
+        !isCallRequest &&
+        !inviteMsg &&
+        (type === 'agentdecision' ||
+        payload.type === 'AgentDecision' ||
+        type === 'decision' ||
+        payload.type === 'decision' ||
+        Boolean(payload.voice_message_to_elder) ||
+        Boolean(payload.ai_reply) ||
+        Boolean(payload.reply_to_elder));
+
+      if (isAiAgentDecision) {
+        // Record receipt timestamp so safety fallback timer cancels immediately
+        lastReceivedAiDecisionTimeRef.current = Date.now();
+
+        // 2a. Check if action requires critical life-safety escalation
+        if (action === 'emergency_escalate' || action === 'escalate_112' || severity === 'critical') {
+          triggerFallAlert();
+          return;
+        }
+
+        // 2b. Extract AI voice reply strictly addressed to the elder
+        const aiVoiceReply = String(
+          payload.voice_message_to_elder ||
+          payload.ai_reply ||
+          payload.reply_to_elder ||
+          ''
+        ).trim();
+
+        console.log('🤖 Processed Hosted LLM Agent Decision:', {
+          decision_id: payload.decision_id,
+          action,
+          reply: aiVoiceReply,
+          reasoning: payload.reasoning_trace,
+        });
+
+        if (aiVoiceReply) {
+          const isAlreadySpoken = Boolean(
+            payload.decision_id && payload.decision_id === lastSpokenAiDecisionIdRef.current
+          );
+          if (payload.decision_id) {
+            lastSpokenAiDecisionIdRef.current = payload.decision_id;
+          }
+
+          setAiAgentStatus({
+            action: action || 'ai_reply',
+            message: aiVoiceReply,
+            reasoning: payload.reasoning_trace || 'Hosted LLM Agent real-time reasoning',
+            severity: payload.severity || 'low',
+            timestamp: Date.now(),
+          });
+
+          if (!isAlreadySpoken) {
+            console.log('🔊 Speaking Hosted LLM Agent Voice Reply:', aiVoiceReply);
+            playGentleChime();
+
+            if (action === 'voice_check') {
+              speakThenListen({
+                prompt: aiVoiceReply,
+                language: payload.language_code || selectedLang,
+                duration: 5,
+                onTranscript: async (elderReply) => {
+                  if (!elderReply) return;
+                  setLastSpokenText(elderReply);
+                  playSuccessChime();
+
+                  const responseEvent = buildSensorEvent({
+                    eventType: 'voice_input',
+                    confidence: 1.0,
+                    voiceTranscript: elderReply,
+                    sender: 'Kamala Devi (Elder)',
+                  });
+
+                  try {
+                    await postSensorEvent(responseEvent);
+                  } catch (e) {}
+                },
+              });
+            } else {
+              speak(aiVoiceReply, payload.language_code || selectedLang);
+            }
+          }
+        }
+
+        return;
+      }
+
+      // =========================================================================
+      // 3. FAMILY DASHBOARD ALERT (Schema C broadcast for Caregiver Dashboard)
+      // If critical emergency, notify elder; otherwise silent for elder tablet
+      // =========================================================================
+      if (type === 'familyalert' || payload.type === 'FamilyAlert') {
+        if (severity === 'critical' || action === 'emergency_escalate') {
+          triggerFallAlert();
+        }
+        return;
+      }
+
+      // =========================================================================
+      // 4. FAMILY ALERT ACKNOWLEDGMENT / REASSURANCE (Family clicked Acknowledge)
       // =========================================================================
       const isAck =
         ['family_acknowledgement', 'alert_acknowledged', 'familyalertack', 'escalation.status_changed', 'ack', 'acknowledge'].includes(type) ||
@@ -1095,8 +1556,8 @@ export default function ElderScreen() {
         (lowerText.includes('acknowledged') || lowerText.includes('on my way') || lowerText.includes('coming home') || lowerText.includes('arjun dispatched') || lowerText.includes('priya responded'));
 
       if (isAck) {
-        const ackBy = payload.acknowledged_by || payload.changed_by_name || payload.sender || 'Priya (Daughter)';
-        const ackMsg = rawText || `${ackBy} acknowledged your alert and is on her way home!`;
+        const ackBy = payload.acknowledged_by || payload.changed_by_name || payload.sender || familyContactName;
+        const ackMsg = rawText || `${ackBy} acknowledged your alert and is on the way home!`;
         setFamilyAck({ acknowledgedBy: ackBy, message: ackMsg, timestamp: Date.now() });
         playGentleChime();
         speak(`${ackBy} has acknowledged your alert and is on the way to help you.`, selectedLang);
@@ -1105,63 +1566,87 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 3. INCOMING FAMILY MESSAGE / NOTE (from MessageComposer or sendFamilyMessage)
-      // Captures ONLY the raw, genuine human message directly from Teammate 4
-      // Strictly rejects ANY AI agent decision, LLM synthesis, or reasoning trace!
+      // 5. INCOMING FAMILY MESSAGE / NOTE FROM PRIYA (EXACT CAREGIVER TEXT)
+      // Displays in the Family Live Card when typed by caregiver on dashboard
       // =========================================================================
-      const isAiAgentPayload =
-        type === 'agentdecision' ||
-        type === 'decision' ||
-        Boolean(payload.decision_id) ||
-        Boolean(payload.reasoning_trace) ||
-        Boolean(payload.voice_message_to_elder);
+      const isFromElder =
+        (payload.sender && payload.sender.toLowerCase().includes(currentElderName)) ||
+        (payload.sender && payload.sender.toLowerCase().includes('kamala')) ||
+        eventType === 'voice_input' ||
+        payload.type === 'elder_voice' ||
+        type === 'elder_voice' ||
+        payload.type === 'elder_status' ||
+        type === 'elder_status' ||
+        payload.type === 'family_reply' ||
+        (payload.elder_id === ELDER_ID && !payload.sender?.toLowerCase().includes('priya'));
 
-      const isRawFamilySensorEvent =
-        eventType === 'voice_input' &&
-        Boolean(payload.voice_transcript) &&
-        !payload.sender?.includes('Kamala') &&
-        !lowerText.includes('call connected') &&
-        !lowerText.includes('user confirmed') &&
-        !lowerText.includes('elder initiated') &&
-        !lowerText.includes('calling priya') &&
-        !lowerText.includes('direct phone call');
+      const extractVerbatimMessage = () => {
+        if (isFromElder) return null;
+        if (type === 'agentdecision' || payload.type === 'AgentDecision') return null;
 
-      const isDirectFamilyMessage =
-        ['family_message', 'familymessage', 'family_note'].includes(type) ||
-        (type === 'message' && !payload.sender?.includes('Kamala'));
+        if (payload.family_message && payload.family_message.startsWith('FAMILY_MESSAGE:')) {
+          const parts = payload.family_message.split(':');
+          if (parts.length >= 3) return parts.slice(2).join(':').trim();
+        }
+        if (rawText.startsWith('FAMILY_MESSAGE:')) {
+          const parts = rawText.split(':');
+          if (parts.length >= 3) return parts.slice(2).join(':').trim();
+        }
+        if (['family_message', 'familymessage', 'family_note'].includes(type) && payload.text) {
+          return String(payload.text).trim();
+        }
+        if (payload.note && typeof payload.note === 'string' && !isCallKeywordsPresent) {
+          return String(payload.note).trim();
+        }
+        if (payload.sender && payload.sender.toLowerCase().includes('priya') && (payload.message || payload.text)) {
+          return String(payload.message || payload.text).trim();
+        }
+        return null;
+      };
 
-      if (!isAiAgentPayload && (isRawFamilySensorEvent || isDirectFamilyMessage)) {
-        // Take the EXACT verbatim message directly as typed by Teammate 4 - NO translation, NO refining!
-        const exactMsg = String(payload.voice_transcript || payload.message || payload.text || '');
-        if (exactMsg.trim()) {
-          const senderName = 'Priya (Daughter)';
+      const verbatimMsg = extractVerbatimMessage();
 
-          console.log('📬 Live Family Card: Displaying exact verbatim message (resets in 7s):', exactMsg);
+      const isFamilyMessageIntent =
+        !isFromElder &&
+        !isCallRequest &&
+        Boolean(verbatimMsg) &&
+        (
+          ['family_message', 'familymessage', 'family_note'].includes(type) ||
+          Boolean(payload.note) ||
+          Boolean(payload.sender && payload.sender.toLowerCase().includes('priya'))
+        );
+
+      if (!isCallRequest && isFamilyMessageIntent && verbatimMsg) {
+        const senderName = 'Priya (Daughter)';
+        console.log('📬 Live Family Card: Displaying message from caregiver:', verbatimMsg);
+        
+        setFamilyMessage({
+          sender: senderName,
+          text: verbatimMsg,
+          time: 'Just now',
+          timestamp: Date.now(),
+        });
+
+        playGentleChime();
+        speak(verbatimMsg, selectedLang);
+
+        if (familyMessageResetTimerRef.current) {
+          clearTimeout(familyMessageResetTimerRef.current);
+        }
+        familyMessageResetTimerRef.current = setTimeout(() => {
           setFamilyMessage({
             sender: senderName,
-            text: exactMsg,
+            text: "Hello! I'm here if you need anything. Just let me know whenever you'd like to talk.",
             time: 'Just now',
             timestamp: Date.now(),
           });
+        }, 8000);
 
-          playGentleChime();
-          // Speak exact message text as-is without any AI modification
-          speak(exactMsg, selectedLang);
-
-          // Reset back to default message after exactly 7 seconds
-          if (familyMessageResetTimerRef.current) {
-            clearTimeout(familyMessageResetTimerRef.current);
-          }
-          familyMessageResetTimerRef.current = setTimeout(() => {
-            setFamilyMessage(DEFAULT_FAMILY_MESSAGE);
-          }, 7000);
-
-          return;
-        }
+        return;
       }
 
       // =========================================================================
-      // 4. FAMILY DAILY CHECK-IN SYNC (Teammate 4 sendCheckIn: emotion_detected)
+      // 6. FAMILY DAILY CHECK-IN SYNC (Teammate 4 sendCheckIn: emotion_detected)
       // =========================================================================
       if (eventType === 'emotion_detected') {
         const emotion = payload.emotion || 'happy';
@@ -1173,7 +1658,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 5. FAMILY MEDICATION NUDGE / REMINDER (Teammate 4 sendMedicationMissed)
+      // 7. FAMILY MEDICATION NUDGE / REMINDER (Teammate 4 sendMedicationMissed)
       // =========================================================================
       const isMedNudge =
         ['medication_reminder', 'family_nudge', 'task', 'task.created', 'medication_nudge'].includes(type) ||
@@ -1193,7 +1678,7 @@ export default function ElderScreen() {
       }
 
       // =========================================================================
-      // 5. TRUE CRITICAL EMERGENCY (Fall detected, 112 Escalation, Manual Panic)
+      // 8. TRUE CRITICAL EMERGENCY (Fall detected, 112 Escalation, Manual Panic)
       // =========================================================================
       const isCriticalEmergency =
         (action === 'emergency_escalate' || action === 'escalate_112') ||
@@ -1201,89 +1686,8 @@ export default function ElderScreen() {
         (severity === 'critical' && (lowerText.includes('fall') || lowerText.includes('unresponsive')) && !lowerText.includes('sos button') && !lowerText.includes('phone call') && !lowerText.includes('calling priya'));
 
       if (isCriticalEmergency) {
-        const promptToSpeak = localizeMessage(rawText, selectedLang) || t.alertSub;
-        setFallReason(promptToSpeak);
-        setFallModalOpen(true);
-        playEmergencyAlarm();
+        triggerFallAlert();
         return;
-      }
-
-      // =========================================================================
-      // 6. AI CORE DIRECT VOICE REPLIES & INQUIRIES (Teammate 2 AgentDecision)
-      // Speaks whatever the AI Core gives clearly and precisely!
-      // Displays directly in the Companion Sanctuary Card (top card with microphone)
-      // =========================================================================
-      const isAiCoreDecision =
-        type === 'agentdecision' ||
-        type === 'decision' ||
-        payload.type === 'AgentDecision' ||
-        Boolean(payload.voice_message_to_elder) ||
-        Boolean(payload.ai_reply) ||
-        Boolean(payload.reply_to_elder);
-
-      if (isAiCoreDecision) {
-        // Extract the exact voice reply given by the AI Core
-        const aiVoiceReply = String(
-          payload.voice_message_to_elder ||
-          payload.ai_reply ||
-          payload.reply_to_elder ||
-          payload.family_message ||
-          payload.reasoning_trace ||
-          rawText ||
-          ''
-        ).trim();
-
-        if (aiVoiceReply) {
-          console.log('🤖 Speaking AI Core Voice Reply:', aiVoiceReply);
-
-          setAiAgentStatus({
-            action: action || 'ai_reply',
-            message: aiVoiceReply,
-            reasoning: payload.reasoning_trace || 'AI Core real-time reasoning',
-            severity: payload.severity || 'low',
-            timestamp: Date.now(),
-          });
-
-          playGentleChime();
-          setLastSpokenText(aiVoiceReply);
-
-          // If AI Core requested a two-way voice check, speak then listen
-          if (action === 'voice_check') {
-            speakThenListen({
-              prompt: aiVoiceReply,
-              language: selectedLang,
-              duration: 5,
-              onTranscript: async (elderReply) => {
-                if (!elderReply) return;
-                setLastSpokenText(elderReply);
-                playSuccessChime();
-
-                sendMessage({
-                  type: 'elder_reply_to_agent',
-                  elder_id: 'kamala_001',
-                  reply: elderReply,
-                  timestamp: new Date().toISOString(),
-                });
-
-                const responseEvent = buildSensorEvent({
-                  eventType: 'voice_input',
-                  confidence: 1.0,
-                  voiceTranscript: elderReply,
-                  sender: 'Kamala Devi (Elder)',
-                });
-
-                try {
-                  await postSensorEvent(responseEvent);
-                } catch (e) {}
-              },
-            });
-          } else {
-            // Speak the AI Core's reply clearly and precisely
-            speak(aiVoiceReply, selectedLang);
-          }
-
-          return;
-        }
       }
 
       // End of classification pipeline
@@ -1291,43 +1695,24 @@ export default function ElderScreen() {
     [selectedLang, t, speak, speakThenListen, sendMessage]
   );
 
-  /**
-   * Router: Ingests every WebSocket event directly into classifyAndDispatchMessage
-   */
   useEffect(() => {
-    if (!lastMessage) return;
+    classifyAndDispatchRef.current = classifyAndDispatchMessage;
+  }, [classifyAndDispatchMessage]);
+
+  /**
+   * Router: Ingests every WebSocket event directly into classifyAndDispatchMessage.
+   * Tracks lastHandledMsgRef to guarantee each message is processed exactly once (no loops).
+   */
+  const lastHandledMsgRef = useRef(null);
+  useEffect(() => {
+    if (!lastMessage || lastMessage === lastHandledMsgRef.current) return;
+    lastHandledMsgRef.current = lastMessage;
     try {
       classifyAndDispatchMessage(lastMessage);
     } catch (err) {
       console.warn('Failed to classify incoming WebSocket message:', err);
     }
   }, [lastMessage, classifyAndDispatchMessage]);
-
-  // Active Sync Polling Loop: Checks for latest decisions and events from Teammate 4 & AI Agent
-  useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      // Skip if modal open or in cooldown
-      if (fallModalOpen) return;
-      if (Date.now() - alertDismissedAtRef.current < ALERT_COOLDOWN_MS) return;
-
-      try {
-        const [decisions, events] = await Promise.all([
-          fetchLatestDecisions(5).catch(() => []),
-          fetchLatestEvents(10).catch(() => []),
-        ]);
-        const decisionsList = Array.isArray(decisions) ? decisions : (decisions?.decisions || []);
-        const eventsList = Array.isArray(events) ? events : (events?.events || []);
-        const items = [...decisionsList, ...eventsList];
-        for (const item of items) {
-          classifyAndDispatchMessage(item);
-        }
-      } catch (err) {
-        // Silent fallback catch
-      }
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [classifyAndDispatchMessage, fallModalOpen]);
 
   // Simulation Handlers for Team Demonstration & Testing
   const simulateIncomingFamilyMessage = useCallback((sender = 'Priya (Daughter)', text = 'Had lunch Amma? Taking my break now, visiting this evening! ❤️') => {
@@ -1465,10 +1850,10 @@ export default function ElderScreen() {
     statusTone = 'amber';
     statusHeadline = t.reconnectingStatus;
     statusDetail = t.reconnectingSub;
-  } else if (medications.some((m) => m.dueNow && !m.taken)) {
+  } else if (medications.some((m) => m.status === 'pending')) {
     statusTone = 'amber';
-    statusHeadline = '⚠️ Afternoon Medication Due (1:30 PM)';
-    statusDetail = 'Calcium + Vit D3 — Tap 💊 to mark as taken';
+    statusHeadline = `⚠️ ${medications.filter((m) => m.status === 'pending').length} Medications Pending`;
+    statusDetail = 'Tap 💊 button to open your medication tracker';
   }
 
   return (
@@ -1515,198 +1900,28 @@ export default function ElderScreen() {
           </div>
 
           <div className="companion-nav-actions">
-            {/* Sleek Medication Pill */}
-            <button
-              className={`glass-med-pill ${
-                medications.some((m) => m.dueNow && !m.taken) ? 'med-pill-alert' : 'med-pill-calm'
-              }`}
-              onClick={() => setShowMedDrawer((prev) => !prev)}
-              aria-label="Medications Menu"
-              title="Medication Tracker"
-            >
-              <span className="med-pill-emoji">💊</span>
-              <span className="med-pill-label">
-                {medications.some((m) => m.dueNow && !m.taken)
-                  ? `${medications.filter((m) => !m.taken).length} ${t.medDueBadge}`
-                  : `${medications.filter((m) => m.taken).length}/${medications.length} ✓`}
-              </span>
-            </button>
-
-
+            <nav className="companion-nav-tabs" aria-label="Main Navigation">
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeTab === 'home' ? 'nav-tab-active' : ''}`}
+                onClick={() => setActiveTab('home')}
+                aria-current={activeTab === 'home' ? 'page' : undefined}
+              >
+                <span className="nav-tab-icon">🌿</span>
+                <span className="nav-tab-text">Care Sanctuary</span>
+              </button>
+              <button
+                type="button"
+                className={`nav-tab-btn ${activeTab === 'profile' ? 'nav-tab-active' : ''}`}
+                onClick={() => setActiveTab('profile')}
+                aria-current={activeTab === 'profile' ? 'page' : undefined}
+              >
+                <span className="nav-tab-icon">👤</span>
+                <span className="nav-tab-text">Health Profile</span>
+              </button>
+            </nav>
           </div>
         </header>
-
-        {/* IN-FLOW COLLAPSIBLE MEDICATION SCHEDULE DRAWER */}
-        {showMedDrawer && (
-          <section className="glass-drawer-panel med-drawer">
-            <div className="drawer-header">
-              <span className="drawer-title">💊 {t.medTrackerTitle}</span>
-              <div className="med-popover-badge-group">
-                <span className="med-popover-count">
-                  {medications.filter((m) => m.taken).length}/{medications.length} {t.medTakenBadge}
-                </span>
-                <button
-                  className="btn-close-drawer"
-                  onClick={() => setShowMedDrawer(false)}
-                  title="Close Drawer"
-                >
-                  ✕
-                </button>
-              </div>
-            </div>
-
-            {/* Untaken Due Alert Banner */}
-            {medications.some((m) => m.dueNow && !m.taken) && (
-              <div className="med-popover-alert-banner">
-                ⚠️ <strong>Dose Due Now:</strong>{' '}
-                1:30 PM (Calcium + Vit D3)
-              </div>
-            )}
-
-            <div className="med-popover-list">
-              {medications.map((med) => {
-                const displayName = med.name;
-                const displaySlot = med.timeSlot;
-
-                return (
-                  <div
-                    key={med.id}
-                    className={`med-popover-item ${
-                      med.taken ? 'popover-item-taken' : med.dueNow ? 'popover-item-due' : 'popover-item-pending'
-                    }`}
-                  >
-                    <div className="popover-item-info">
-                      <span className="popover-item-icon">{med.icon}</span>
-                      <div className="popover-item-text">
-                        <span className="popover-med-name">{displayName}</span>
-                        <span className="popover-med-slot">
-                          {displaySlot} {med.taken && med.timeTaken ? `• ✓ ${med.timeTaken}` : ''}
-                        </span>
-                      </div>
-                    </div>
-
-                    <button
-                      className={`btn-popover-check ${med.taken ? 'btn-popover-done' : 'btn-popover-action'}`}
-                      onClick={() => handleToggleMedication(med.id)}
-                    >
-                      {med.taken ? `✓ ${t.medTakenBadge}` : t.medMarkTakenBtn}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* ShastraVision Live Perception Simulator Drawer */}
-        {showVisionMenu && (
-          <section className="glass-drawer-panel vision-drawer">
-            <div className="drawer-header">
-              <span className="drawer-title">{t.drawerVisionTitle}</span>
-              <span className="drawer-badge">MediaPipe + DeepFace</span>
-            </div>
-            <div className="drawer-buttons-row">
-              <button
-                className="drawer-btn btn-trigger-fall"
-                onClick={() => triggerSimulatedVisionEvent('fall')}
-              >
-                {t.drawerTriggerFall}
-              </button>
-              <button
-                className="drawer-btn btn-trigger-sad"
-                onClick={() => triggerSimulatedVisionEvent('emotion_detected', 'sad')}
-              >
-                {t.drawerTriggerSad}
-              </button>
-              <button
-                className="drawer-btn btn-trigger-fear"
-                onClick={() => triggerSimulatedVisionEvent('emotion_detected', 'fear')}
-              >
-                {t.drawerTriggerFear}
-              </button>
-              <button
-                className="drawer-btn btn-trigger-inactivity"
-                onClick={() => triggerSimulatedVisionEvent('inactivity')}
-              >
-                {t.drawerTriggerInactivity}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* Family & AI LLM Live Simulators Drawer */}
-        {showFamilySimMenu && (
-          <section className="glass-drawer-panel family-sim-drawer">
-            <div className="drawer-header">
-              <span className="drawer-title">👨‍👩‍👧 Family Dashboard &amp; AI LLM Live Simulators</span>
-              <span className="drawer-badge">Bidirectional Test</span>
-            </div>
-            <div className="drawer-buttons-row">
-              <button
-                className="drawer-btn drawer-btn-family"
-                onClick={() => simulateIncomingFamilyMessage('Priya (Daughter)', 'Amma, checking in! Did you take your medicine? Coming home at 6 PM! ❤️')}
-              >
-                💬 Msg from Priya
-              </button>
-              <button
-                className="drawer-btn drawer-btn-family"
-                onClick={() => simulateIncomingFamilyCall('Priya (Daughter)')}
-              >
-                📞 Call from Priya
-              </button>
-              <button
-                className="drawer-btn drawer-btn-family"
-                onClick={() => simulateFamilyAcknowledgment('Priya (Daughter)', "Priya acknowledged: 'On my way home Amma! Don\'t worry.'")}
-              >
-                🤝 Family Ack
-              </button>
-              <button
-                className="drawer-btn drawer-btn-family"
-                onClick={() => simulateFamilyMedNudge('Priya (Daughter)', 'Please take your 1:30 PM Calcium pill with water.')}
-              >
-                💊 Med Nudge
-              </button>
-              <button
-                className="drawer-btn drawer-btn-ai"
-                onClick={simulateAiAgentVoiceCheck}
-              >
-                🧠 AI Voice Check
-              </button>
-              <button
-                className="drawer-btn drawer-btn-ai"
-                onClick={simulateAiAgentEmergencyEscalate}
-              >
-                🚨 AI Emergency 112
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* Health Check-Ins Drawer */}
-        {showCheckInMenu && (
-          <section className="glass-drawer-panel checkin-drawer">
-            <div className="drawer-header">
-              <span className="drawer-title">{t.drawerCheckInTitle}</span>
-            </div>
-            <div className="drawer-buttons-row">
-              <button className="drawer-btn" onClick={() => { triggerCognitive(); setShowCheckInMenu(false); }}>
-                {t.drawerCognitive}
-              </button>
-              <button className="drawer-btn" onClick={() => { triggerMeal('breakfast'); setShowCheckInMenu(false); }}>
-                {t.drawerBreakfast}
-              </button>
-              <button className="drawer-btn" onClick={() => { triggerMeal('lunch'); setShowCheckInMenu(false); }}>
-                {t.drawerLunch}
-              </button>
-              <button className="drawer-btn" onClick={() => { triggerSleep(); setShowCheckInMenu(false); }}>
-                {t.drawerSleep}
-              </button>
-              <button className="drawer-btn" onClick={() => { triggerMobility(); setShowCheckInMenu(false); }}>
-                {t.drawerMobility}
-              </button>
-            </div>
-          </section>
-        )}
 
         {/* ============================================================
             2. BACKEND INCOMING ALERT & PRIVILEGE ESCALATION MODE
@@ -1764,6 +1979,8 @@ export default function ElderScreen() {
               </button>
             </div>
           </section>
+        ) : activeTab === 'profile' ? (
+          <ElderProfileView onProfileChange={handleProfileUpdate} />
         ) : (
           /* ============================================================
              3. MOBILE VERTICAL STACK: THE 3 MAJOR BUTTONS & ALTERNATE FEATURES
@@ -1890,22 +2107,40 @@ export default function ElderScreen() {
                     </div>
                     <p className="speech-transcript-text">&ldquo;{interimText}&rdquo;</p>
                   </div>
-                ) : lastSpokenText ? (
+                ) : (lastSpokenText || aiAgentStatus?.message) ? (
                   <div className="companion-speech-card dialogue-confirmed">
-                    <div className="speech-card-header">
-                      <span className="speech-sender-tag">
-                        {aiAgentStatus?.message === lastSpokenText ? '🤖 AI Core Reply:' : '🗣️ You said:'}
-                      </span>
-                      <button
-                        className="btn-replay-voice"
-                        onClick={() => {
-                          speak(lastSpokenText, selectedLang);
-                        }}
-                      >
-                        🔊 Replay Voice
-                      </button>
-                    </div>
-                    <p className="speech-transcript-text">&ldquo;{lastSpokenText}&rdquo;</p>
+                    {lastSpokenText && (
+                      <div style={{ marginBottom: aiAgentStatus?.message ? '8px' : '0' }}>
+                        <div className="speech-card-header">
+                          <span className="speech-sender-tag" style={{ color: 'rgba(255, 255, 255, 0.65)' }}>
+                            🗣️ You said:
+                          </span>
+                        </div>
+                        <p className="speech-transcript-text" style={{ fontSize: '0.92rem', color: 'rgba(255, 255, 255, 0.82)', margin: '2px 0 6px 0' }}>
+                          &ldquo;{lastSpokenText}&rdquo;
+                        </p>
+                      </div>
+                    )}
+                    {aiAgentStatus?.message && (
+                      <div style={{ borderTop: lastSpokenText ? '1px solid rgba(255, 255, 255, 0.08)' : 'none', paddingTop: lastSpokenText ? '8px' : '0' }}>
+                        <div className="speech-card-header">
+                          <span className="speech-sender-tag" style={{ color: '#F0A395', fontWeight: '700' }}>
+                            🤖 AI Companion:
+                          </span>
+                          <button
+                            className="btn-replay-voice"
+                            onClick={() => {
+                              speak(aiAgentStatus.message, selectedLang);
+                            }}
+                          >
+                            🔊 Replay Voice
+                          </button>
+                        </div>
+                        <p className="speech-transcript-text" style={{ color: '#FFFFFF', fontWeight: '600', margin: '4px 0 0 0' }}>
+                          &ldquo;{aiAgentStatus.message}&rdquo;
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="companion-idle-helper">
@@ -1920,49 +2155,132 @@ export default function ElderScreen() {
             {/* ============================================================
                 FAMILY DASHBOARD LIVE SYNC CARD (Bidirectional Family Link)
                 ============================================================ */}
-            <section className="family-live-card">
+            <section className="family-live-card" aria-label="Family Live Sync">
               <div className="glass-specular-edge" aria-hidden="true"></div>
+              
+              {/* Dynamic Live Header */}
               <div className="family-card-header">
                 <div className="family-sender-identity">
-                  <div className="family-avatar-orb">👩‍💼</div>
+                  <div className="family-avatar-orb">
+                    <span className="family-avatar-emoji">👩‍💼</span>
+                    <span className="family-avatar-online-dot" title="Family online"></span>
+                  </div>
                   <div className="family-sender-meta">
-                    <span className="family-sender-name">{familyMessage.sender}</span>
+                    <div className="family-sender-row">
+                      <span className="family-sender-name">{familyMessage.sender}</span>
+                      <span className="family-relation-pill">Family Caregiver</span>
+                    </div>
                     <span className="family-time-tag">Sent {familyMessage.time}</span>
                   </div>
                 </div>
-                <div className="family-sync-indicator">
-                  <span className="sync-pulse-dot"></span>
-                  <span>Live Synced</span>
+                <div className="family-sync-indicator" title="Synchronized in real-time with Family Dashboard">
+                  <span className="sync-pulse-wrapper">
+                    <span className="sync-pulse-dot"></span>
+                    <span className="sync-pulse-ring"></span>
+                  </span>
+                  <span className="sync-label">Live Synced</span>
                 </div>
               </div>
 
-              <div className="family-message-bubble">
-                <p className="family-message-text">&ldquo;{familyMessage.text}&rdquo;</p>
-              </div>
+              {/* Custom Status Composer Section */}
+              <div className="family-status-composer">
+                <div className="composer-header-row">
+                  <div className="composer-label">
+                    <span className="composer-icon">✍️</span>
+                    <span className="composer-heading">Share Status With {familyMessage.sender.split(' ')[0]}</span>
+                  </div>
+                  {customStatusText.length > 0 && (
+                    <span className="composer-char-badge">{customStatusText.length} chars</span>
+                  )}
+                </div>
 
-              <div className="family-actions-row">
-                <button
-                  className="btn-family-quick-reply"
-                  onClick={handleFamilyReply}
-                  title="Send quick reassurance"
+                <form
+                  className="family-status-form"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handleSendCustomStatus();
+                  }}
                 >
-                  <span>❤️</span>
-                  <span>Send &quot;I&apos;m Doing Well&quot;</span>
-                </button>
+                  <div className={`family-status-input-wrapper ${customStatusText ? 'has-text' : ''}`}>
+                    <input
+                      ref={statusInputRef}
+                      type="text"
+                      className="family-status-input"
+                      placeholder="Type Your Status"
+                      aria-label="Type Your Status"
+                      value={customStatusText}
+                      onChange={(e) => setCustomStatusText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSendCustomStatus();
+                        }
+                      }}
+                    />
 
-                <button
-                  className={`btn-family-voice-reply ${familyVoiceReplyActive ? 'voice-recording-pulse' : ''}`}
-                  onClick={handleVoiceReplyToFamily}
-                  title="Record voice note to Priya"
-                >
-                  <span>🎙️</span>
-                  <span>{familyVoiceReplyActive ? `Listening... (${secondsLeft}s)` : 'Voice Reply'}</span>
-                </button>
+                    {customStatusText && (
+                      <button
+                        type="button"
+                        className="btn-status-clear"
+                        onClick={() => {
+                          setCustomStatusText('');
+                          if (statusInputRef.current) statusInputRef.current.focus();
+                        }}
+                        title="Clear text"
+                        aria-label="Clear status text"
+                      >
+                        ✕
+                      </button>
+                    )}
 
+                    <button
+                      type="submit"
+                      className={`btn-family-status-send ${customStatusText.trim() ? 'active' : ''}`}
+                      disabled={!customStatusText.trim() || isSendingStatus}
+                      title="Send your status update"
+                      aria-label="Send status update"
+                    >
+                      {isSendingStatus ? (
+                        <span className="status-sending-spinner"></span>
+                      ) : (
+                        <>
+                          <span className="send-btn-icon">➤</span>
+                          <span className="send-btn-label">Send Status</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+
+                {/* Quick Suggestion Chips */}
+                <div className="family-presets-container">
+                  <span className="presets-label">Quick Suggestions:</span>
+                  <div className="family-status-chips-scroll">
+                    {STATUS_PRESETS.map((preset) => (
+                      <button
+                        key={preset.text}
+                        type="button"
+                        className={`family-status-chip ${customStatusText === preset.text ? 'selected' : ''}`}
+                        onClick={() => handleSelectPreset(preset.text)}
+                        title={`Select "${preset.text}"`}
+                      >
+                        <span className="chip-emoji">{preset.emoji}</span>
+                        <span className="chip-text">{preset.text}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Live Sent Confirmation Feedback */}
                 {familyReplied && (
-                  <span className="family-reply-sent-tag">
-                    ✓ Dispatched to {familyMessage.sender.split(' ')[0]}
-                  </span>
+                  <div className="family-status-sent-banner" role="status">
+                    <span className="sent-banner-check">✓</span>
+                    <span className="sent-banner-text">
+                      Status sent to {familyMessage.sender.split(' ')[0]}:
+                      <strong> &ldquo;{lastSentStatus || "I'm Doing Well"}&rdquo;</strong>
+                    </span>
+                    <span className="sent-banner-time">Just now</span>
+                  </div>
                 )}
               </div>
             </section>
@@ -1994,9 +2312,9 @@ export default function ElderScreen() {
                     </svg>
                   </div>
                   <div className="action-text-stack">
-                    <span className="action-badge-chip badge-sage">{t.callFamilyBadge}</span>
-                    <h2 className="action-main-title">{t.callFamilyBtn}</h2>
-                    <p className="action-sub-text">{t.callFamilySub}</p>
+                    <span className="action-badge-chip badge-sage">PRIYA</span>
+                    <h2 className="action-main-title">Call Priya</h2>
+                    <p className="action-sub-text">Priya (Daughter) • Instant phone call</p>
                   </div>
                 </div>
               </button>
@@ -2089,35 +2407,105 @@ export default function ElderScreen() {
               {isListening ? t.telemetryVoiceListening : isSpeaking ? t.telemetryVoiceSpeaking : t.telemetryVoiceReady}
             </span>
           </div>
-
-          <div className="telemetry-buttons-group">
-            <button
-              className="btn-footer-tool"
-              onClick={() => setShowFamilySimMenu((prev) => !prev)}
-              title="Family Dashboard & AI Simulators"
-            >
-              👨‍👩‍👧 Family &amp; AI
-            </button>
-            <button
-              className="btn-footer-tool"
-              onClick={() => setShowVisionMenu((prev) => !prev)}
-              title="ShastraVision Simulator"
-            >
-              {t.toolVisionSim}
-            </button>
-            <button
-              className="btn-footer-tool"
-              onClick={() => setShowCheckInMenu((prev) => !prev)}
-              title="Health Check-ins"
-            >
-              {t.toolCheckIns}
-            </button>
-            <button className="btn-footer-tool" onClick={triggerMobility}>
-              {t.toolSteadiness}
-            </button>
-          </div>
         </footer>
       </div>
+
+      {/* ============================================================
+          FLOATING ACTION BUTTON — MEDICATION REMINDER (bottom-right)
+          ============================================================ */}
+      {showMedFab && (
+        <div className="med-fab-backdrop" onClick={() => setShowMedFab(false)} aria-hidden="true" />
+      )}
+
+      {showMedFab && (
+        <div className="med-fab-panel" role="dialog" aria-label="Medication Reminder">
+          <div className="med-fab-panel-header">
+            <div className="med-fab-panel-title-group">
+              <span className="med-fab-panel-icon">💊</span>
+              <div>
+                <h3 className="med-fab-panel-title">My Medications</h3>
+                <span className="med-fab-panel-subtitle">
+                  {medications.filter((m) => m.status === 'done').length}/{medications.length} Done
+                </span>
+              </div>
+            </div>
+            <button
+              className="med-fab-close-btn"
+              onClick={() => setShowMedFab(false)}
+              aria-label="Close medication panel"
+            >
+              ✕
+            </button>
+          </div>
+
+          <div className="med-fab-list">
+            {medications.length === 0 && (
+              <div className="med-fab-empty">
+                <span>No medications yet.</span>
+                <span className="med-fab-empty-sub">Tap below to add your first medicine.</span>
+              </div>
+            )}
+            {medications.map((med) => (
+              <div
+                key={med.id}
+                className={`med-fab-item ${med.status === 'done' ? 'med-fab-item-done' : ''}`}
+              >
+                <div className="med-fab-item-info">
+                  <span className="med-fab-item-emoji">{med.emoji}</span>
+                  <span className="med-fab-item-name">{med.name}</span>
+                </div>
+                <button
+                  className={`med-fab-status-btn ${med.status === 'done' ? 'med-fab-status-done' : 'med-fab-status-pending'}`}
+                  onClick={() => handleToggleMedication(med.id)}
+                >
+                  {med.status === 'done' ? '✓ Done!' : 'Pending'}
+                </button>
+              </div>
+            ))}
+          </div>
+
+          <div className="med-fab-add-row">
+            <input
+              type="text"
+              className="med-fab-add-input"
+              placeholder="Add medicine name..."
+              value={newMedName}
+              onChange={(e) => setNewMedName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleAddMedicine(newMedName);
+                  setNewMedName('');
+                }
+              }}
+              maxLength={60}
+            />
+            <button
+              className="med-fab-add-btn"
+              onClick={() => {
+                handleAddMedicine(newMedName);
+                setNewMedName('');
+              }}
+              disabled={!newMedName.trim()}
+            >
+              + Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      <button
+        className={`med-fab-button ${medications.some((m) => m.status === 'pending') ? 'med-fab-has-pending' : 'med-fab-all-done'}`}
+        onClick={() => setShowMedFab((prev) => !prev)}
+        aria-label="Open Medication Reminder"
+        title="Medication Reminder"
+      >
+        <span className="med-fab-icon">💊</span>
+        {medications.some((m) => m.status === 'pending') && (
+          <span className="med-fab-badge">
+            {medications.filter((m) => m.status === 'pending').length}
+          </span>
+        )}
+      </button>
 
       {/* Incoming Family Call Modal Overlay */}
       {incomingCall && (
@@ -2188,7 +2576,7 @@ export default function ElderScreen() {
             </div>
             <div className="call-meta-stack">
               <span className="call-incoming-label" style={{ color: '#34D399', letterSpacing: '0.08em', fontWeight: '800' }}>CALLING PRIYA</span>
-              <h2 className="call-caller-name">{outgoingCall.target}</h2>
+              <h2 className="call-caller-name">Priya (Daughter)</h2>
               <p className="call-sub-note">{outgoingCall.phone} • Ringing Family Dashboard</p>
             </div>
             <div className="call-actions-row">
@@ -2209,10 +2597,11 @@ export default function ElderScreen() {
       {fallModalOpen && (
         <FallEmergencyModal
           isOpen={fallModalOpen}
-          fallReason={fallReason}
+          fallReason={fallReason || `${elderFirstName}, did you fall? Are you fine? Please confirm if you are okay.`}
           onConfirmSafe={handleFallModalSafe}
           onEmergencyEscalate={handleSOS}
           selectedLang={selectedLang}
+          elderName={elderFirstName}
         />
       )}
 

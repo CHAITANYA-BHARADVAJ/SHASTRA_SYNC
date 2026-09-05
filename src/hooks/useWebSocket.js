@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 
 // Single Base Backend WebSocket URL used across the entire team
 const WS_URL = import.meta.env.VITE_WS_URL || 'wss://3.110.50.100.nip.io/ws/alerts';
-const ELDER_ID = import.meta.env.VITE_ELDER_ID || 'elder_kamala_001';
+const ELDER_ID = import.meta.env.VITE_ELDER_ID || 'kamala_001';
 
 const INITIAL_RETRY_MS = 1500;
 const MAX_RETRY_MS = 5000;
@@ -13,17 +13,37 @@ const HEARTBEAT_INTERVAL_MS = 25000;
  * Connects directly and exclusively to the team's shared base backend URL.
  * Automatically keeps alive and reconnects without jumping to unintended local addresses.
  */
-export function useWebSocket() {
+export function useWebSocket(onMessageCallback) {
   const [isConnected, setIsConnected] = useState(false);
   const [connectionState, setConnectionState] = useState('disconnected');
   const [lastMessage, setLastMessage] = useState(null);
 
   const wsRef = useRef(null);
+  const messageQueueRef = useRef([]);
   const retryDelayRef = useRef(INITIAL_RETRY_MS);
   const retryTimerRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
   const mountedRef = useRef(true);
   const intentionalCloseRef = useRef(false);
+  const onMessageCallbackRef = useRef(onMessageCallback);
+
+  useEffect(() => {
+    onMessageCallbackRef.current = onMessageCallback;
+  }, [onMessageCallback]);
+
+  const flushQueue = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    while (messageQueueRef.current.length > 0) {
+      const payload = messageQueueRef.current.shift();
+      try {
+        const serialized = typeof payload === 'string' ? payload : JSON.stringify(payload);
+        wsRef.current.send(serialized);
+        console.log('📤 Successfully sent queued payload to Team WebSocket:', payload);
+      } catch (e) {
+        console.warn('Failed to send queued WebSocket payload:', e);
+      }
+    }
+  }, []);
 
   const startHeartbeat = useCallback(() => {
     if (heartbeatTimerRef.current) clearInterval(heartbeatTimerRef.current);
@@ -39,7 +59,7 @@ export function useWebSocket() {
             })
           );
         } catch (e) {
-          // Silent catch on heartbeat error
+          console.warn('Ping failed:', e);
         }
       }
     }, HEARTBEAT_INTERVAL_MS);
@@ -88,6 +108,9 @@ export function useWebSocket() {
           console.warn('Failed to dispatch registration frame:', e);
         }
 
+        // Flush any queued messages that were attempted before connection completed
+        flushQueue();
+
         // Start ping heartbeat to prevent Cloudflare/Render idle timeouts
         startHeartbeat();
       };
@@ -104,15 +127,28 @@ export function useWebSocket() {
 
           console.log('🚨 Incoming Team WebSocket Payload:', data);
           setLastMessage(data);
+          if (onMessageCallbackRef.current) {
+            try {
+              onMessageCallbackRef.current(data);
+            } catch (cbErr) {
+              console.warn('Error in onMessageCallback:', cbErr);
+            }
+          }
         } catch (parseErr) {
           console.log('🚨 Incoming Plain Text WebSocket Message:', event.data);
           if (event.data && typeof event.data === 'string' && event.data.trim()) {
-            setLastMessage({
+            const rawObj = {
               type: 'raw_text',
               text: event.data.trim(),
               message: event.data.trim(),
               timestamp: new Date().toISOString(),
-            });
+            };
+            setLastMessage(rawObj);
+            if (onMessageCallbackRef.current) {
+              try {
+                onMessageCallbackRef.current(rawObj);
+              } catch (cbErr) {}
+            }
           }
         }
       };
@@ -146,7 +182,7 @@ export function useWebSocket() {
       console.error('Failed to initialize WebSocket connection:', err);
       setConnectionState('disconnected');
     }
-  }, [startHeartbeat, stopHeartbeat]);
+  }, [startHeartbeat, stopHeartbeat, flushQueue]);
 
   /**
    * Dispatches payload to the team's shared WebSocket hub.
@@ -163,8 +199,10 @@ export function useWebSocket() {
         return false;
       }
     }
-    console.warn('Team WebSocket not open yet. Payload not sent.');
-    return false;
+    // Queue payload so it is automatically flushed as soon as connection is open
+    messageQueueRef.current.push(payload);
+    console.log('⏳ Queued WebSocket payload for send upon connection open:', payload);
+    return true;
   }, []);
 
   useEffect(() => {

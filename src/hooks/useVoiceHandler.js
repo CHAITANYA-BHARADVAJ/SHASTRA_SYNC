@@ -8,6 +8,49 @@ export function detectLanguage(text, fallback = 'en-IN') {
 }
 
 /**
+ * Chunks long Indic/Kannada text at sentence or natural clause boundaries (<= 130 chars)
+ * ensuring smooth audio streaming without hitting URL length limits.
+ */
+function splitTextIntoAudioChunks(text, maxLen = 130) {
+  if (!text || typeof text !== 'string') return [];
+  const clean = text.trim();
+  if (clean.length <= maxLen) return [clean];
+
+  // Split on clause terminators or punctuation
+  const parts = clean.split(/([.,!?।\n;]+)/);
+  const chunks = [];
+  let current = '';
+
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    if (!part) continue;
+    if ((current + part).length <= maxLen) {
+      current += part;
+    } else {
+      if (current.trim()) chunks.push(current.trim());
+      if (part.length <= maxLen) {
+        current = part;
+      } else {
+        const words = part.split(/\s+/);
+        let sub = '';
+        for (const w of words) {
+          if ((sub + ' ' + w).length <= maxLen) {
+            sub = sub ? sub + ' ' + w : w;
+          } else {
+            if (sub.trim()) chunks.push(sub.trim());
+            sub = w;
+          }
+        }
+        current = sub;
+      }
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length ? chunks : [clean.substring(0, maxLen)];
+}
+
+
+/**
  * Native Web Speech API Voice Handler.
  * Captures both interim and finalized speech transcript seamlessly.
  */
@@ -30,6 +73,21 @@ export function useVoiceHandler() {
   const languageCodeRef = useRef('en-IN');
 
   const silenceTimeoutRef = useRef(null);
+  const errorTimeoutRef = useRef(null);
+  const currentAudioRef = useRef(null);
+  const activeSessionRef = useRef(null);
+  const abortIndicAudioRef = useRef(false);
+
+  const setAutoClearingError = useCallback((msg, timeoutMs = 3500) => {
+    if (errorTimeoutRef.current) clearTimeout(errorTimeoutRef.current);
+    setError(msg);
+    if (msg && timeoutMs > 0) {
+      errorTimeoutRef.current = setTimeout(() => {
+        setError(null);
+        errorTimeoutRef.current = null;
+      }, timeoutMs);
+    }
+  }, []);
 
   // Debug logging
   const log = useCallback((msg, type = 'info') => {
@@ -61,13 +119,33 @@ export function useVoiceHandler() {
   }, []);
 
   /**
-   * Stop recognition session and cancel any speech synthesis
+   * Stop recognition session and cancel any speech synthesis or Indic audio
    */
   const stop = useCallback(() => {
     clearTimers();
+    if (errorTimeoutRef.current) {
+      clearTimeout(errorTimeoutRef.current);
+      errorTimeoutRef.current = null;
+    }
+    setError(null);
     isSessionActiveRef.current = false;
+    abortIndicAudioRef.current = true;
+    activeSessionRef.current = null;
+    if (currentAudioRef.current) {
+      try {
+        currentAudioRef.current.pause();
+        currentAudioRef.current.currentTime = 0;
+        currentAudioRef.current.src = '';
+      } catch (e) {}
+      currentAudioRef.current = null;
+    }
     if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch (e) {}
+      try {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.abort();
+      } catch (e) {}
       recognitionRef.current = null;
     }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
@@ -91,7 +169,12 @@ export function useVoiceHandler() {
     isSessionActiveRef.current = false;
 
     if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
+      try {
+        recognitionRef.current.onresult = null;
+        recognitionRef.current.onerror = null;
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+      } catch (e) {}
       recognitionRef.current = null;
     }
 
@@ -108,7 +191,7 @@ export function useVoiceHandler() {
       log(`📝 Captured Speech: "${finalResult}"`, 'success');
       if (cb) cb(finalResult, languageCodeRef.current || 'en-IN');
     } else {
-      log('⚠️ Listening concluded with no speech detected.', 'warn');
+      log('ℹ️ Listening concluded. Ready for next interaction.', 'info');
       if (cb) cb(null, languageCodeRef.current || 'en-IN');
     }
 
@@ -125,7 +208,7 @@ export function useVoiceHandler() {
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       const msg = 'navigator.mediaDevices.getUserMedia is unavailable.';
-      setError(msg);
+      setAutoClearingError(msg, 4000);
       log(msg, 'error');
       return false;
     }
@@ -159,9 +242,10 @@ export function useVoiceHandler() {
       return true;
     } catch (err) {
       log(`❌ Mic permission error: ${err.message}`, 'error');
+      setAutoClearingError(`Mic permission error: ${err.message}`, 4000);
       return false;
     }
-  }, [log]);
+  }, [log, setAutoClearingError]);
 
   /**
    * Start listening (supports both positional and object options)
@@ -169,6 +253,10 @@ export function useVoiceHandler() {
   const listen = useCallback(
     (arg1 = 'en-IN', arg2) => {
       setError(null);
+      if (errorTimeoutRef.current) {
+        clearTimeout(errorTimeoutRef.current);
+        errorTimeoutRef.current = null;
+      }
       setInterimText('');
 
       let targetLang = 'en-IN';
@@ -184,7 +272,7 @@ export function useVoiceHandler() {
 
       if (!SpeechRecognition) {
         const msg = 'Web Speech API not supported in this browser. Please use Chrome or Edge.';
-        setError(msg);
+        setAutoClearingError(msg, 5000);
         log(msg, 'error');
         if (onTranscriptCb) onTranscriptCb(null);
         return;
@@ -193,7 +281,7 @@ export function useVoiceHandler() {
       // Forcibly stop any ongoing speech/audio so microphone can record cleanly
       stop();
 
-      const duration = (typeof arg1 === 'object' && arg1?.duration) ? arg1.duration : 5;
+      const duration = (typeof arg1 === 'object' && arg1?.duration) ? arg1.duration : 6;
 
       onTranscriptCallbackRef.current = onTranscriptCb;
       languageCodeRef.current = targetLang;
@@ -206,7 +294,7 @@ export function useVoiceHandler() {
 
       log(`🎙️ Live Microphone Open (${targetLang} • ${duration}s). Ready...`, 'info');
 
-      // 1. Countdown timer (5 seconds)
+      // 1. Countdown timer
       listeningTimerIntervalRef.current = setInterval(() => {
         listeningSecondsLeftRef.current -= 1;
         setSecondsLeft(Math.max(0, listeningSecondsLeftRef.current));
@@ -217,75 +305,140 @@ export function useVoiceHandler() {
       }, 1000);
 
       // 2. SpeechRecognition instance with High-Precision Multi-turn Buffering
-      try {
-        const rec = new SpeechRecognition();
-        rec.continuous = true;
-        rec.interimResults = true;
-        rec.maxAlternatives = 3;
-        rec.lang = targetLang;
+      const startRecognitionSession = () => {
+        if (!isSessionActiveRef.current) return;
 
-        rec.onstart = () => {
-          log(`🎙️ SpeechRecognition active (lang: ${targetLang})`, 'success');
-          setIsListening(true);
-        };
+        try {
+          const rec = new SpeechRecognition();
+          rec.continuous = true;
+          rec.interimResults = true;
+          rec.maxAlternatives = 3;
+          rec.lang = targetLang;
 
-        rec.onresult = (event) => {
-          let finalTranscript = '';
-          let interimTranscript = '';
+          rec.onstart = () => {
+            log(`🎙️ SpeechRecognition active (lang: ${targetLang})`, 'success');
+            setIsListening(true);
+          };
 
-          for (let i = 0; i < event.results.length; ++i) {
-            const resultItem = event.results[i];
-            const transcriptChunk = resultItem[0]?.transcript || '';
+          rec.onresult = (event) => {
+            let finalTranscript = '';
+            let interimTranscript = '';
 
-            if (resultItem.isFinal) {
-              finalTranscript += transcriptChunk + ' ';
-            } else {
-              interimTranscript += transcriptChunk;
+            for (let i = 0; i < event.results.length; ++i) {
+              const resultItem = event.results[i];
+              const transcriptChunk = resultItem[0]?.transcript || '';
+
+              if (resultItem.isFinal) {
+                finalTranscript += transcriptChunk + ' ';
+              } else {
+                interimTranscript += transcriptChunk;
+              }
             }
-          }
 
-          const cleanCombined = (finalTranscript + interimTranscript).trim().replace(/\s+/g, ' ');
+            const cleanCombined = (finalTranscript + interimTranscript).trim().replace(/\s+/g, ' ');
 
-          if (cleanCombined) {
-            latestSpokenTranscriptRef.current = cleanCombined;
-            setInterimText(cleanCombined);
-            log(`📝 Heard: "${cleanCombined}"`, 'success');
+            if (cleanCombined) {
+              latestSpokenTranscriptRef.current = cleanCombined;
+              setInterimText(cleanCombined);
+              log(`📝 Heard: "${cleanCombined}"`, 'success');
 
-            // ⚡ Smart Voice Activity Snapping:
-            // 1.35s quiet buffer prevents cutting off seniors mid-sentence
-            if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-            silenceTimeoutRef.current = setTimeout(() => {
+              // ⚡ Smart Voice Activity Snapping:
+              // 1.4s quiet buffer prevents cutting off seniors mid-sentence
+              if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+              silenceTimeoutRef.current = setTimeout(() => {
+                finishListening();
+              }, 1400);
+            }
+          };
+
+          rec.onerror = (e) => {
+            log(`Speech Recognition event: ${e.error}`, ['no-speech', 'aborted'].includes(e.error) ? 'info' : 'error');
+            if (e.error === 'no-speech' || e.error === 'aborted') {
+              return;
+            }
+            if (e.error === 'not-allowed') {
+              setAutoClearingError('Microphone access blocked. Click mic or check browser settings.', 4000);
+              if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+              }
               finishListening();
-            }, 1350);
-          }
-        };
+            } else if (e.error === 'network') {
+              setAutoClearingError('Voice network busy. Tap mic to retry or type your status.', 3500);
+              finishListening();
+            } else if (e.error === 'audio-capture') {
+              setAutoClearingError('No microphone detected. Please check audio device.', 3500);
+              finishListening();
+            } else {
+              setAutoClearingError(`Mic note: ${e.error}`, 3000);
+            }
+          };
 
-        rec.onerror = (e) => {
-          log(`Speech Recognition event: ${e.error}`, e.error === 'no-speech' ? 'warn' : 'error');
-          if (e.error === 'not-allowed') {
-            setError('Microphone access blocked in browser settings.');
-          } else if (e.error === 'network') {
-            setError('Google Speech server was unreachable on this Wi-Fi network.');
-          }
-        };
+          rec.onend = () => {
+            if (isSessionActiveRef.current) {
+              finishListening();
+            }
+          };
 
-        rec.onend = () => {
-          if (isSessionActiveRef.current && listeningSecondsLeftRef.current > 0) {
-            try {
-              rec.start();
-            } catch (err) {}
+          recognitionRef.current = rec;
+          rec.start();
+        } catch (err) {
+          if (err.name === 'InvalidStateError' || err.message?.includes('already started')) {
+            log('SpeechRecognition audio track busy, retrying in 75ms...', 'info');
+            setTimeout(() => {
+              if (isSessionActiveRef.current) {
+                try {
+                  const retryRec = new SpeechRecognition();
+                  retryRec.continuous = true;
+                  retryRec.interimResults = true;
+                  retryRec.maxAlternatives = 3;
+                  retryRec.lang = targetLang;
+                  retryRec.onstart = () => {
+                    log(`🎙️ SpeechRecognition active (lang: ${targetLang})`, 'success');
+                    setIsListening(true);
+                  };
+                  retryRec.onresult = (event) => {
+                    let finalTranscript = '';
+                    let interimTranscript = '';
+                    for (let i = 0; i < event.results.length; ++i) {
+                      const resultItem = event.results[i];
+                      const transcriptChunk = resultItem[0]?.transcript || '';
+                      if (resultItem.isFinal) finalTranscript += transcriptChunk + ' ';
+                      else interimTranscript += transcriptChunk;
+                    }
+                    const cleanCombined = (finalTranscript + interimTranscript).trim().replace(/\s+/g, ' ');
+                    if (cleanCombined) {
+                      latestSpokenTranscriptRef.current = cleanCombined;
+                      setInterimText(cleanCombined);
+                      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+                      silenceTimeoutRef.current = setTimeout(() => finishListening(), 1400);
+                    }
+                  };
+                  retryRec.onerror = (e) => {
+                    if (['no-speech', 'aborted'].includes(e.error)) return;
+                    setAutoClearingError(`Mic note: ${e.error}`, 3000);
+                    finishListening();
+                  };
+                  retryRec.onend = () => {
+                    if (isSessionActiveRef.current) finishListening();
+                  };
+                  recognitionRef.current = retryRec;
+                  retryRec.start();
+                } catch (retryErr) {
+                  log(`SpeechRecognition retry error: ${retryErr.message}`, 'error');
+                  finishListening();
+                }
+              }
+            }, 75);
+          } else {
+            log(`Failed to start SpeechRecognition: ${err.message}`, 'error');
+            finishListening();
           }
-        };
+        }
+      };
 
-        recognitionRef.current = rec;
-        rec.start();
-      } catch (err) {
-        log(`Failed to start SpeechRecognition: ${err.message}`, 'error');
-        setIsListening(false);
-        if (onTranscriptCb) onTranscriptCb(null);
-      }
+      startRecognitionSession();
     },
-    [SpeechRecognition, stop, finishListening, log]
+    [SpeechRecognition, stop, finishListening, log, setAutoClearingError]
   );
 
   // Load voices dynamically on launch
@@ -410,6 +563,122 @@ export function useVoiceHandler() {
   }, [log]);
 
   /**
+   * Play authentic, high-fidelity neural Indic audio stream with natural accent and cadence
+   */
+  const playIndicAudio = useCallback(
+    (text, langCode = 'kn', onEnd = null) => {
+      if (!text || typeof text !== 'string') {
+        if (onEnd) onEnd();
+        return;
+      }
+
+      // Abort previous session and speech synthesis
+      abortIndicAudioRef.current = true;
+      if (currentAudioRef.current) {
+        try {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+          currentAudioRef.current.src = '';
+        } catch (e) {}
+        currentAudioRef.current = null;
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch (e) {}
+      }
+
+      const sessionId = Symbol('indic-tts-session');
+      activeSessionRef.current = sessionId;
+      abortIndicAudioRef.current = false;
+
+      const chunks = splitTextIntoAudioChunks(text, 130);
+      if (!chunks.length) {
+        isSpeakingRef.current = false;
+        setIsSpeaking(false);
+        if (onEnd) onEnd();
+        return;
+      }
+
+      isSpeakingRef.current = true;
+      setIsSpeaking(true);
+      log(`🎙️ Authentic Indic Neural TTS (${langCode}): "${text.substring(0, 50)}..."`, 'info');
+
+      let chunkIndex = 0;
+
+      const playNextChunk = () => {
+        if (activeSessionRef.current !== sessionId || abortIndicAudioRef.current) {
+          if (activeSessionRef.current === sessionId) {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+            currentAudioRef.current = null;
+          }
+          return;
+        }
+
+        if (chunkIndex >= chunks.length) {
+          if (activeSessionRef.current === sessionId) {
+            isSpeakingRef.current = false;
+            setIsSpeaking(false);
+            currentAudioRef.current = null;
+            if (onEnd) onEnd();
+          }
+          return;
+        }
+
+        const chunk = chunks[chunkIndex];
+        chunkIndex++;
+
+        // 1. Same-Origin Vite proxy endpoint
+        const primaryUrl = `/api/tts?q=${encodeURIComponent(chunk)}&tl=${encodeURIComponent(langCode)}`;
+        // 2. Direct fallback to Google TTS URL if proxy encounters an issue
+        const fallbackUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(chunk)}&tl=${encodeURIComponent(langCode)}&client=tw-ob`;
+
+        const audio = new Audio();
+        currentAudioRef.current = audio;
+
+        let hasHandledEnd = false;
+        const handleDone = () => {
+          if (hasHandledEnd) return;
+          hasHandledEnd = true;
+          audio.onended = null;
+          audio.onerror = null;
+          playNextChunk();
+        };
+
+        audio.onended = handleDone;
+
+        audio.onerror = (err) => {
+          if (activeSessionRef.current !== sessionId || abortIndicAudioRef.current) return;
+          console.warn(`[IndicTTS] Audio chunk error on ${audio.src}, attempting fallback...`, err);
+          if (audio.src && audio.src.includes('/api/tts')) {
+            audio.src = fallbackUrl;
+            audio.play().catch(() => handleDone());
+          } else {
+            handleDone();
+          }
+        };
+
+        audio.src = primaryUrl;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            if (activeSessionRef.current !== sessionId || abortIndicAudioRef.current) return;
+            console.warn('[IndicTTS] Audio play() promise rejected:', err);
+            if (audio.src && audio.src.includes('/api/tts')) {
+              audio.src = fallbackUrl;
+              audio.play().catch(() => handleDone());
+            } else {
+              handleDone();
+            }
+          });
+        }
+      };
+
+      playNextChunk();
+    },
+    [log]
+  );
+
+  /**
    * Speak TTS then listen immediately with zero latency (supports both object and positional args)
    */
   const speakThenListen = useCallback(
@@ -430,11 +699,42 @@ export function useVoiceHandler() {
         onTranscriptCb = arg3 || null;
       }
 
+      if (!msg) {
+        listen(targetLang, onTranscriptCb);
+        return;
+      }
+
       // Auto-detect language script
       if (/[\u0C80-\u0CFF]/.test(msg)) targetLang = 'kn-IN';
       else if (/[\u0900-\u097F]/.test(msg)) targetLang = 'hi-IN';
       else if (/[\u0B80-\u0BFF]/.test(msg)) targetLang = 'ta-IN';
       else if (/[\u0C00-\u0C7F]/.test(msg)) targetLang = 'te-IN';
+
+      const prefix = targetLang.split('-')[0].toLowerCase();
+      const isKannada =
+        prefix === 'kn' ||
+        /[\u0C80-\u0CFF]/.test(msg) ||
+        /\b(namaskara|namaskar|hegidd|oota|thindi|sahaya|biddidd|aushadhi|kannada|avare|mathad|bejaru|arama|chennagidd)\b/i.test(msg);
+
+      // Kannada route -> Always high-fidelity Indic neural TTS!
+      if (isKannada) {
+        playIndicAudio(msg, 'kn', () => {
+          listen(targetLang, onTranscriptCb);
+        });
+        return;
+      }
+
+      // Other Indic routes without natural browser voice
+      if (['hi', 'ta', 'te'].includes(prefix)) {
+        const naturalVoice = getVoiceForLanguage(targetLang);
+        const isTrueNatural = naturalVoice && (naturalVoice.name.toLowerCase().includes('natural') || naturalVoice.name.toLowerCase().includes('neural'));
+        if (!isTrueNatural) {
+          playIndicAudio(msg, prefix, () => {
+            listen(targetLang, onTranscriptCb);
+          });
+          return;
+        }
+      }
 
       log(`⚡ Clear Voice TTS (${targetLang}): "${msg.substring(0, 60)}..."`, 'info');
 
@@ -449,12 +749,11 @@ export function useVoiceHandler() {
         try { window.speechSynthesis.resume(); } catch (e) {}
       }
 
-      const isIndic = ['kn', 'hi', 'ta', 'te'].includes(targetLang.split('-')[0]);
       const targetVoice = getVoiceForLanguage(targetLang);
 
       const utterance = new SpeechSynthesisUtterance(msg);
-      utterance.lang = targetVoice ? targetVoice.lang : (isIndic ? targetLang : 'en-US');
-      utterance.rate = isIndic ? 0.90 : 1.0;
+      utterance.lang = targetVoice ? targetVoice.lang : 'en-US';
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       if (targetVoice) {
@@ -478,13 +777,13 @@ export function useVoiceHandler() {
 
       window.speechSynthesis.speak(utterance);
     },
-    [isTTSSupported, listen, log, getVoiceForLanguage]
+    [isTTSSupported, listen, log, getVoiceForLanguage, playIndicAudio]
   );
 
   const speak = useCallback(
     (message, languageCode = 'en-IN') => {
-      if (!isTTSSupported) return;
-      window.speechSynthesis.cancel();
+      if (!message || typeof message !== 'string') return;
+      setError(null);
 
       // Auto-detect language script
       let detectedLang = languageCode || 'en-IN';
@@ -493,12 +792,36 @@ export function useVoiceHandler() {
       else if (/[\u0B80-\u0BFF]/.test(message)) detectedLang = 'ta-IN';
       else if (/[\u0C00-\u0C7F]/.test(message)) detectedLang = 'te-IN';
 
-      const isIndic = ['kn', 'hi', 'ta', 'te'].includes(detectedLang.split('-')[0]);
+      const prefix = detectedLang.split('-')[0].toLowerCase();
+      const isKannada =
+        prefix === 'kn' ||
+        /[\u0C80-\u0CFF]/.test(message) ||
+        /\b(namaskara|namaskar|hegidd|oota|thindi|sahaya|biddidd|aushadhi|kannada|avare|mathad|bejaru|arama|chennagidd)\b/i.test(message);
+
+      // Kannada route -> Always high-fidelity Indic neural TTS!
+      if (isKannada) {
+        playIndicAudio(message, 'kn');
+        return;
+      }
+
+      // Other Indic routes without natural browser voice
+      if (['hi', 'ta', 'te'].includes(prefix)) {
+        const naturalVoice = getVoiceForLanguage(detectedLang);
+        const isTrueNatural = naturalVoice && (naturalVoice.name.toLowerCase().includes('natural') || naturalVoice.name.toLowerCase().includes('neural'));
+        if (!isTrueNatural) {
+          playIndicAudio(message, prefix);
+          return;
+        }
+      }
+
+      if (!isTTSSupported) return;
+      window.speechSynthesis.cancel();
+
       const targetVoice = getVoiceForLanguage(detectedLang);
 
       const utterance = new SpeechSynthesisUtterance(message);
-      utterance.lang = targetVoice ? targetVoice.lang : (isIndic ? detectedLang : 'en-US');
-      utterance.rate = isIndic ? 0.90 : 1.0;
+      utterance.lang = targetVoice ? targetVoice.lang : 'en-US';
+      utterance.rate = 1.0;
       utterance.pitch = 1.0;
 
       if (targetVoice) {
@@ -517,14 +840,28 @@ export function useVoiceHandler() {
         setIsSpeaking(false);
       };
 
-      window.speechSynthesis.speak(utterance);
+      if (window.speechSynthesis.paused) {
+        try { window.speechSynthesis.resume(); } catch (e) {}
+      }
+
+      setTimeout(() => {
+        try {
+          if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+          }
+          window.speechSynthesis.speak(utterance);
+        } catch (e) {
+          console.warn('speechSynthesis.speak error:', e);
+        }
+      }, 40);
     },
-    [isTTSSupported, getVoiceForLanguage]
+    [isTTSSupported, getVoiceForLanguage, playIndicAudio]
   );
 
   return {
     speakThenListen,
     speak,
+    playIndicAudio,
     listen,
     stop,
     finishListening,
@@ -532,6 +869,7 @@ export function useVoiceHandler() {
     isSpeaking,
     isListening,
     error,
+    clearError: () => setError(null),
     isSupported,
     isSecureContext,
     secondsLeft,
@@ -540,3 +878,4 @@ export function useVoiceHandler() {
     clearLogs,
   };
 }
+
