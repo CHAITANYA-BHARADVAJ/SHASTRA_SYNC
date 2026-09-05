@@ -252,11 +252,13 @@ export function useVoiceHandler() {
    */
   const listen = useCallback(
     (arg1 = 'en-IN', arg2) => {
-      setError(null);
+      // Safely cleanup previous recognition and audio before starting
+      clearTimers();
       if (errorTimeoutRef.current) {
         clearTimeout(errorTimeoutRef.current);
         errorTimeoutRef.current = null;
       }
+      setError(null);
       setInterimText('');
 
       let targetLang = 'en-IN';
@@ -278,10 +280,33 @@ export function useVoiceHandler() {
         return;
       }
 
-      // Forcibly stop any ongoing speech/audio so microphone can record cleanly
-      stop();
+      // If audio is currently playing, stop it cleanly
+      if (currentAudioRef.current) {
+        try {
+          currentAudioRef.current.pause();
+          currentAudioRef.current.currentTime = 0;
+          currentAudioRef.current.src = '';
+        } catch (e) {}
+        currentAudioRef.current = null;
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        try { window.speechSynthesis.cancel(); } catch (e) {}
+      }
+      isSpeakingRef.current = false;
+      setIsSpeaking(false);
 
-      const duration = (typeof arg1 === 'object' && arg1?.duration) ? arg1.duration : 6;
+      // Cleanly detach any previous recognition instance without triggering its onend
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.onresult = null;
+          recognitionRef.current.onerror = null;
+          recognitionRef.current.onend = null;
+          recognitionRef.current.abort();
+        } catch (e) {}
+        recognitionRef.current = null;
+      }
+
+      const duration = (typeof arg1 === 'object' && arg1?.duration) ? arg1.duration : 8;
 
       onTranscriptCallbackRef.current = onTranscriptCb;
       languageCodeRef.current = targetLang;
@@ -304,141 +329,145 @@ export function useVoiceHandler() {
         }
       }, 1000);
 
-      // 2. SpeechRecognition instance with High-Precision Multi-turn Buffering
-      const startRecognitionSession = () => {
-        if (!isSessionActiveRef.current) return;
+      // Flag to track fatal errors (like mic permission denied)
+      let fatalError = false;
 
-        try {
-          const rec = new SpeechRecognition();
-          rec.continuous = true;
-          rec.interimResults = true;
-          rec.maxAlternatives = 3;
-          rec.lang = targetLang;
+      // 2. SpeechRecognition instance with auto-keepalive during the active listening window
+      const startRecognitionSession = (delayMs = 0) => {
+        if (!isSessionActiveRef.current || fatalError) return;
 
-          rec.onstart = () => {
-            log(`🎙️ SpeechRecognition active (lang: ${targetLang})`, 'success');
-            setIsListening(true);
-          };
+        const launch = () => {
+          if (!isSessionActiveRef.current || fatalError) return;
 
-          rec.onresult = (event) => {
-            let finalTranscript = '';
-            let interimTranscript = '';
+          try {
+            const rec = new SpeechRecognition();
+            rec.continuous = true;
+            rec.interimResults = true;
+            rec.maxAlternatives = 3;
+            rec.lang = targetLang;
 
-            for (let i = 0; i < event.results.length; ++i) {
-              const resultItem = event.results[i];
-              const transcriptChunk = resultItem[0]?.transcript || '';
+            rec.onstart = () => {
+              log(`🎙️ Microphone active & listening (lang: ${targetLang})`, 'success');
+              setIsListening(true);
+            };
 
-              if (resultItem.isFinal) {
-                finalTranscript += transcriptChunk + ' ';
-              } else {
-                interimTranscript += transcriptChunk;
-              }
-            }
+            rec.onresult = (event) => {
+              let sessionFinal = '';
+              let sessionInterim = '';
 
-            const cleanCombined = (finalTranscript + interimTranscript).trim().replace(/\s+/g, ' ');
+              for (let i = 0; i < event.results.length; ++i) {
+                const resultItem = event.results[i];
+                const transcriptChunk = resultItem[0]?.transcript || '';
 
-            if (cleanCombined) {
-              latestSpokenTranscriptRef.current = cleanCombined;
-              setInterimText(cleanCombined);
-              log(`📝 Heard: "${cleanCombined}"`, 'success');
-
-              // ⚡ Smart Voice Activity Snapping:
-              // 1.4s quiet buffer prevents cutting off seniors mid-sentence
-              if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-              silenceTimeoutRef.current = setTimeout(() => {
-                finishListening();
-              }, 1400);
-            }
-          };
-
-          rec.onerror = (e) => {
-            log(`Speech Recognition event: ${e.error}`, ['no-speech', 'aborted'].includes(e.error) ? 'info' : 'error');
-            if (e.error === 'no-speech' || e.error === 'aborted') {
-              return;
-            }
-            if (e.error === 'not-allowed') {
-              setAutoClearingError('Microphone access blocked. Click mic or check browser settings.', 4000);
-              if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
-              }
-              finishListening();
-            } else if (e.error === 'network') {
-              setAutoClearingError('Voice network busy. Tap mic to retry or type your status.', 3500);
-              finishListening();
-            } else if (e.error === 'audio-capture') {
-              setAutoClearingError('No microphone detected. Please check audio device.', 3500);
-              finishListening();
-            } else {
-              setAutoClearingError(`Mic note: ${e.error}`, 3000);
-            }
-          };
-
-          rec.onend = () => {
-            if (isSessionActiveRef.current) {
-              finishListening();
-            }
-          };
-
-          recognitionRef.current = rec;
-          rec.start();
-        } catch (err) {
-          if (err.name === 'InvalidStateError' || err.message?.includes('already started')) {
-            log('SpeechRecognition audio track busy, retrying in 75ms...', 'info');
-            setTimeout(() => {
-              if (isSessionActiveRef.current) {
-                try {
-                  const retryRec = new SpeechRecognition();
-                  retryRec.continuous = true;
-                  retryRec.interimResults = true;
-                  retryRec.maxAlternatives = 3;
-                  retryRec.lang = targetLang;
-                  retryRec.onstart = () => {
-                    log(`🎙️ SpeechRecognition active (lang: ${targetLang})`, 'success');
-                    setIsListening(true);
-                  };
-                  retryRec.onresult = (event) => {
-                    let finalTranscript = '';
-                    let interimTranscript = '';
-                    for (let i = 0; i < event.results.length; ++i) {
-                      const resultItem = event.results[i];
-                      const transcriptChunk = resultItem[0]?.transcript || '';
-                      if (resultItem.isFinal) finalTranscript += transcriptChunk + ' ';
-                      else interimTranscript += transcriptChunk;
-                    }
-                    const cleanCombined = (finalTranscript + interimTranscript).trim().replace(/\s+/g, ' ');
-                    if (cleanCombined) {
-                      latestSpokenTranscriptRef.current = cleanCombined;
-                      setInterimText(cleanCombined);
-                      if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
-                      silenceTimeoutRef.current = setTimeout(() => finishListening(), 1400);
-                    }
-                  };
-                  retryRec.onerror = (e) => {
-                    if (['no-speech', 'aborted'].includes(e.error)) return;
-                    setAutoClearingError(`Mic note: ${e.error}`, 3000);
-                    finishListening();
-                  };
-                  retryRec.onend = () => {
-                    if (isSessionActiveRef.current) finishListening();
-                  };
-                  recognitionRef.current = retryRec;
-                  retryRec.start();
-                } catch (retryErr) {
-                  log(`SpeechRecognition retry error: ${retryErr.message}`, 'error');
-                  finishListening();
+                if (resultItem.isFinal) {
+                  sessionFinal += transcriptChunk + ' ';
+                } else {
+                  sessionInterim += transcriptChunk;
                 }
               }
-            }, 75);
-          } else {
-            log(`Failed to start SpeechRecognition: ${err.message}`, 'error');
-            finishListening();
+
+              if (sessionFinal) {
+                accumulatedTranscriptRef.current = (accumulatedTranscriptRef.current + ' ' + sessionFinal).trim().replace(/\s+/g, ' ');
+              }
+
+              const fullCombined = (accumulatedTranscriptRef.current + ' ' + sessionInterim).trim().replace(/\s+/g, ' ');
+
+              if (fullCombined) {
+                latestSpokenTranscriptRef.current = fullCombined;
+                setInterimText(fullCombined);
+                log(`📝 Heard: "${fullCombined}"`, 'success');
+
+                // ⚡ Smart Voice Activity Snapping:
+                // 1.5s quiet buffer prevents cutting off seniors mid-sentence
+                if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
+                silenceTimeoutRef.current = setTimeout(() => {
+                  finishListening();
+                }, 1500);
+              }
+            };
+
+            rec.onerror = (e) => {
+              log(`Speech Recognition event: ${e.error}`, ['no-speech', 'aborted'].includes(e.error) ? 'info' : 'error');
+              
+              // Benign errors: Chrome paused or heard no speech yet
+              if (e.error === 'no-speech' || e.error === 'aborted') {
+                return;
+              }
+
+              if (e.error === 'not-allowed') {
+                fatalError = true;
+                setAutoClearingError('Microphone access blocked. Please allow mic in browser settings.', 5000);
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                  navigator.mediaDevices.getUserMedia({ audio: true }).catch(() => {});
+                }
+                finishListening();
+              } else if (e.error === 'audio-capture') {
+                fatalError = true;
+                setAutoClearingError('No microphone detected. Please check your audio device.', 4000);
+                finishListening();
+              } else if (e.error === 'network') {
+                // Network hiccup with Google speech servers; will retry in onend
+                setAutoClearingError('Voice network busy. Reconnecting...', 2000);
+              } else {
+                setAutoClearingError(`Mic notice: ${e.error}`, 3000);
+              }
+            };
+
+            rec.onend = () => {
+              if (!isSessionActiveRef.current) return;
+              if (fatalError) {
+                finishListening();
+                return;
+              }
+
+              // If senior already spoke and silence timeout triggered or is running, wrap up cleanly
+              if (latestSpokenTranscriptRef.current && listeningSecondsLeftRef.current <= 1) {
+                finishListening();
+                return;
+              }
+
+              // If countdown time is still left, keep the microphone alive!
+              // (Chrome SpeechRecognition frequently ends on brief silence / pauses)
+              if (listeningSecondsLeftRef.current > 0) {
+                log('🔄 Chrome paused recognition stream; auto-resuming mic...', 'info');
+                setTimeout(() => {
+                  if (isSessionActiveRef.current && listeningSecondsLeftRef.current > 0) {
+                    startRecognitionSession(0);
+                  }
+                }, 60);
+                return;
+              }
+
+              finishListening();
+            };
+
+            recognitionRef.current = rec;
+            rec.start();
+          } catch (err) {
+            log(`SpeechRecognition start note: ${err.message}`, 'info');
+            if (isSessionActiveRef.current && listeningSecondsLeftRef.current > 0) {
+              setTimeout(() => {
+                if (isSessionActiveRef.current && listeningSecondsLeftRef.current > 0) {
+                  startRecognitionSession(0);
+                }
+              }, 100);
+            } else {
+              finishListening();
+            }
           }
+        };
+
+        if (delayMs > 0) {
+          setTimeout(launch, delayMs);
+        } else {
+          launch();
         }
       };
 
-      startRecognitionSession();
+      // Allow 50ms for any prior aborted tracks to completely clear before opening new session
+      startRecognitionSession(50);
     },
-    [SpeechRecognition, stop, finishListening, log, setAutoClearingError]
+    [SpeechRecognition, finishListening, clearTimers, log, setAutoClearingError]
   );
 
   // Load voices dynamically on launch

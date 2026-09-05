@@ -1158,11 +1158,9 @@ export default function ElderScreen() {
       return;
     }
 
-    stop();
-
     listen({
       language: selectedLang,
-      duration: 6,
+      duration: 8,
       onTranscript: async (transcript) => {
         if (!transcript) return;
         setLastSpokenText(transcript);
